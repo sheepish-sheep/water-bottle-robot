@@ -58,6 +58,49 @@ def pick_offered_bottle(bottles, hands, max_norm_dist=0.5):
     return best_i if best_d <= max_norm_dist else None
 
 
+def iou(a, b):
+    x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+    x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+class OfferedTracker:
+    """
+    Smooths the offered-bottle detection over time so it doesn't flicker:
+      - box position is averaged (alpha = how fast it follows new detections)
+      - a few missed frames don't drop it (hold_frames)
+      - OFFERED turns on only after on_frames hits in a row
+    """
+
+    def __init__(self, alpha=0.4, hold_frames=8, on_frames=3, match_iou=0.2):
+        self.alpha, self.hold, self.on_frames, self.match_iou = alpha, hold_frames, on_frames, match_iou
+        self.box = None      # smoothed (x1,y1,x2,y2)
+        self.misses = 0
+        self.hits = 0
+        self.active = False  # currently showing OFFERED
+
+    def update(self, box):
+        """box: this frame's offered bottle (x1,y1,x2,y2) or None. Returns smoothed box or None."""
+        if box is not None:
+            box = np.asarray(box[:4], dtype=float)
+            if self.box is not None and iou(self.box, box) >= self.match_iou:
+                self.box = self.alpha * box + (1 - self.alpha) * self.box
+                self.hits += 1
+            else:  # new or jumped to a different bottle: restart
+                self.box = box
+                self.hits = 1
+            self.misses = 0
+            if self.hits >= self.on_frames:
+                self.active = True
+        else:
+            self.misses += 1
+            if self.misses > self.hold:
+                self.box, self.hits, self.active = None, 0, False
+        return self.box if self.active else None
+
+
 # ---------- model wrappers ----------
 
 class Detectors:
@@ -118,7 +161,7 @@ class Detectors:
 
 # ---------- drawing ----------
 
-def draw(frame, faces, hands, bottles, offered):
+def draw(frame, faces, hands, bottles, offered, offered_box=None):
     for x1, y1, x2, y2 in faces:
         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 200, 0), 2)
         cv2.putText(frame, "face", (int(x1), int(y1) - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
@@ -126,7 +169,9 @@ def draw(frame, faces, hands, bottles, offered):
         for px, py in hand:
             cv2.circle(frame, (int(px), int(py)), 3, (0, 255, 255), -1)
     for i, (x1, y1, x2, y2, s) in enumerate(bottles):
-        is_off = i == offered
+        is_off = False  # offered bottle is drawn from the smoothed box below
+        if offered_box is not None and iou(offered_box, (x1, y1, x2, y2)) > 0.5:
+            continue
         color = (0, 0, 255) if is_off else (0, 200, 0)
         label = f"OFFERED {s:.2f}" if is_off else f"bottle {s:.2f}"
         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 3 if is_off else 2)
@@ -136,6 +181,15 @@ def draw(frame, faces, hands, bottles, offered):
             cv2.drawMarker(frame, (cx, cy), color, cv2.MARKER_CROSS, 20, 2)
             # this pixel + depth is what the grasp step needs
             cv2.putText(frame, f"target px ({cx},{cy})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    if offered_box is not None:
+        x1, y1, x2, y2 = (int(v) for v in offered_box)
+        red = (0, 0, 255)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), red, 3)
+        cv2.putText(frame, "OFFERED", (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.7, red, 2)
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        cv2.drawMarker(frame, (cx, cy), red, cv2.MARKER_CROSS, 20, 2)
+        # this pixel + depth is what the grasp step needs
+        cv2.putText(frame, f"target px ({cx},{cy})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, red, 2)
 
 
 def main():
@@ -147,6 +201,8 @@ def main():
     ap.add_argument("--yolo", default="yolov8n.pt")
     ap.add_argument("--conf", type=float, default=0.25, help="bottle confidence threshold")
     ap.add_argument("--fullscreen", action="store_true", help="start fullscreen (f toggles)")
+    ap.add_argument("--smooth", type=float, default=0.4, help="box smoothing 0..1 (lower = smoother, laggier)")
+    ap.add_argument("--hold", type=int, default=8, help="frames to keep the box when the bottle is missed")
     args = ap.parse_args()
 
     det = Detectors(args.face_model, args.hand_model, args.yolo, args.conf)
@@ -163,6 +219,7 @@ def main():
                               cv2.WINDOW_FULLSCREEN if on else cv2.WINDOW_NORMAL)
 
     set_full(full)
+    tracker = OfferedTracker(alpha=args.smooth, hold_frames=args.hold)
     n_frames = n_offered = 0
     while True:
         ok, frame = cap.read()
@@ -170,9 +227,10 @@ def main():
             break
         faces, hands, bottles = det.run(frame)
         offered = pick_offered_bottle(bottles, hands)
+        offered_box = tracker.update(bottles[offered] if offered is not None else None)
         n_frames += 1
-        n_offered += offered is not None
-        draw(frame, faces, hands, bottles, offered)
+        n_offered += offered_box is not None
+        draw(frame, faces, hands, bottles, offered, offered_box)
         cv2.imshow(win, frame)
         k = cv2.waitKey(1) & 0xFF
         if k == ord("q"):
