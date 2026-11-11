@@ -162,6 +162,11 @@ def main():
             # lidar mounting yaw relative to base_link. NaN = read it from tf (default)
             self.declare_parameter("angle_offset", float("nan"))
             self.declare_parameter("base_frame", "base_link")
+            # smallest command that actually moves the robot (the sim robot just
+            # slips at ~0.15 m/s); nonzero commands below this get bumped up.
+            # 0 disables.
+            self.declare_parameter("min_v", 0.25)  # m/s
+            self.declare_parameter("min_w", 0.6)   # rad/s, only applied when barely driving
             self.declare_parameter("goal_heading", 0.0)  # rad, 0 = straight ahead
             self.declare_parameter("odom_topic", "/odom")
             # in an enclosed room the lidar always hits a wall; NO returns at all
@@ -422,6 +427,12 @@ def main():
                         self.recovery = ("BACKUP", now + g("backup_time"), sign)
                         self.get_logger().warn(f"STUCK ({self.last_change:.3f} m change) -> backing up")
                         v, w, state = -g("backup_speed"), 0.0, "STUCK_BACKING_UP"
+            # deadband: tiny nonzero commands don't move the robot, bump them up
+            mv, mw = g("min_v"), g("min_w")
+            if mv > 0 and 1e-3 < abs(v) < mv:
+                v = math.copysign(mv, v)
+            if mw > 0 and abs(v) < mv and 1e-3 < abs(w) < mw:
+                w = math.copysign(mw, w)
             t = Twist()
             t.linear.x, t.angular.z = float(v), float(w)
             self.cmd_pub.publish(t)
