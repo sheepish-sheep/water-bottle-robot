@@ -8,11 +8,16 @@ avoidance (reactive/obstacle_avoidance.py's decide()) does the driving.
 Needs Nav2 running first (on the robot: the class repo's
 `ros2 launch parcs_stretch_nav2 navigation.launch.py teleop_type:=keyboard`).
 
-1) Record fountains once (RViz "Publish Point" tool, two clicks):
-       python3 navigation/go_to_fountain.py --add east_hall
-   click 1 = floor spot where the robot should STOP (~0.6 m out from the fountain)
-   click 2 = the fountain itself (sets which way the robot faces at the end)
-   Saved to navigation/fountains.yaml. Repeat for each fountain.
+1) Record fountains once. Saved to navigation/fountains.yaml. Either:
+   a) On the robot (most accurate): localize, drive it with teleop to where it
+      should stop, FACING the fountain, then
+          python3 navigation/go_to_fountain.py --add-here east_hall
+      This saves the robot's current pose from AMCL/tf.
+   b) From the map only (RViz "Publish Point" tool, two clicks):
+          python3 navigation/go_to_fountain.py --add east_hall
+      click 1 = floor spot where the robot should STOP (~0.6 m out from the fountain)
+      click 2 = the fountain itself (sets which way the robot faces at the end)
+   Repeat for each fountain. Re-using a name overwrites that fountain.
 
 2) Go:
        python3 navigation/go_to_fountain.py                       # global localization + reactive driving
@@ -105,6 +110,8 @@ def save_fountains(fountains, path=FOUNTAINS_FILE):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--add", metavar="NAME", help="record a fountain from two RViz Publish Point clicks")
+    ap.add_argument("--add-here", metavar="NAME",
+                    help="record a fountain at the robot's current pose (park it facing the fountain first)")
     ap.add_argument("--controller", choices=["reactive", "nav2"], default="reactive")
     ap.add_argument("--localize", choices=["global", "manual", "none"], default="global",
                     help="none = pose is already known (e.g. the sim, which has no AMCL)")
@@ -154,6 +161,30 @@ def main():
         fountains = [e for e in load_fountains() if e["name"] != args.add] + [entry]
         save_fountains(fountains)
         print(f"saved {entry} to {FOUNTAINS_FILE} ({len(fountains)} fountain(s) total)")
+        rclpy.shutdown()
+        return
+
+    # ----- record at the robot's current pose -----
+    if args.add_here:
+        buf = Buffer()
+        TransformListener(buf, nav)
+        print("reading the robot's pose (map -> base_link)...")
+        pose, end = None, time.monotonic() + 15.0
+        while pose is None and time.monotonic() < end:
+            rclpy.spin_once(nav, timeout_sec=0.2)
+            try:
+                t = buf.lookup_transform("map", "base_link", Time())
+                pose = (t.transform.translation.x, t.transform.translation.y, yaw_of(t.transform.rotation))
+            except Exception:
+                pass
+        if pose is None:
+            rclpy.shutdown()
+            sys.exit("No map -> base_link transform. Is Nav2/AMCL running and the robot localized?")
+        entry = {"name": args.add_here, "x": round(pose[0], 3), "y": round(pose[1], 3), "yaw": round(pose[2], 3)}
+        fountains = [e for e in load_fountains() if e["name"] != args.add_here] + [entry]
+        save_fountains(fountains)
+        print(f"saved {entry} to {FOUNTAINS_FILE} ({len(fountains)} fountain(s) total)")
+        print("Check in RViz that the robot model sits where it really is before trusting this.")
         rclpy.shutdown()
         return
 
