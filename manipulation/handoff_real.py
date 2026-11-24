@@ -21,7 +21,7 @@ everything on Ctrl-C or the run-stop button, and stops if any motion doesn't
 finish in time. Keep a hand on the run-stop.
 
 Every run writes a log (phases + joint/effort samples) to
-~/ros2_ws/artifacts/handoff_real/.
+~/ament_ws/artifacts/handoff_real/.
 """
 import argparse
 import csv
@@ -34,7 +34,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from handoff_controller import Kinematics, Limits, Result, RobotInterface, grasp_height, plan_reach, run_handoff  # noqa: E402
 
-LOG_DIR = os.path.expanduser("~/ros2_ws/artifacts/handoff_real")
+LOG_DIR = os.path.expanduser("~/ament_ws/artifacts/handoff_real")
 
 
 class Abort(Exception):

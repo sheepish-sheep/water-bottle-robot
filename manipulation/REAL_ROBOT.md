@@ -32,14 +32,14 @@ library, which is already installed there. Nothing here uses ROS.
 
 ```bash
 ssh <user>@<robot>
-mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+cd ~/ament_ws/src
 git clone https://github.com/sheepish-sheep/water-bottle-robot.git
 cd water-bottle-robot && git checkout handoff-demo
 ```
 
-Later updates: `cd ~/ros2_ws/src/water-bottle-robot && git pull`.
+Later updates: `cd ~/ament_ws/src/water-bottle-robot && git pull`.
 
-All commands below run on the robot, from `~/ros2_ws/src/water-bottle-robot`.
+All commands below run on the robot, from `~/ament_ws/src/water-bottle-robot`.
 
 ## 1. Every power-up
 
@@ -108,7 +108,7 @@ instead:
 python3 manipulation/handoff_real.py --distance D --hand-top H --tug-threshold 1000   # never lets go
 #   when it offers the bottle back: wait 3 s, then pull gently 2-3 times.
 #   It keeps the bottle and asks you to take it.
-python3 manipulation/handoff_real_check.py tug-log ~/ros2_ws/artifacts/handoff_real/run_<time>.csv
+python3 manipulation/handoff_real_check.py tug-log ~/ament_ws/artifacts/handoff_real/run_<time>.csv
 ```
 
 ## 5. Handoff from the stand, then from a person
@@ -146,7 +146,7 @@ it before opening the gripper. It never just drops it.
 | everything feels slow | `--speed 0.8` (only after it works at 0.5) |
 
 Every run writes a log of phases, joint positions, gripper and arm effort to
-`~/ros2_ws/artifacts/handoff_real/run_<time>.csv`. Send it over when something
+`~/ament_ws/artifacts/handoff_real/run_<time>.csv`. Send it over when something
 goes wrong.
 
 ## For the video
