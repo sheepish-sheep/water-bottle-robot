@@ -12,12 +12,13 @@ stretch_driver / ROS stopped (only one program can talk to the robot).
 the robot's usual tools, e.g. the Xbox controller / stretch_xbox_controller_teleop.py,
 then quit that), it records the arm motor effort while nobody touches the
 robot, then while someone pulls the gripper gently away from the robot (the
-direction the arm extends) a few times. It prints --tug-threshold and
---tug-sign for handoff_real.py.
+direction the arm extends) a few times. It prints the threshold the automatic
+tug detector would use, whether your pull would release the bottle, and the
+--tug-sign to use.
 
 `tug-log`: if `tug` shows almost no change (the arm may not hold position
 when no program is commanding it), measure during a real handoff instead:
-run handoff_real.py with --tug-threshold 1000 (never releases), and when it
+run handoff_real.py with --tug-threshold 1000 (a floor so high it never releases), and when it
 offers the bottle back (GIVE), wait 3 s, then pull gently a few times. It
 keeps the bottle and asks you to take it. Then run tug-log on the log it
 printed. This needs no robot connection.
@@ -27,6 +28,8 @@ import csv
 import statistics
 import sys
 import time
+
+from water_bottle_robot.manipulation.handoff_controller import Limits
 
 
 def connect():
@@ -90,24 +93,37 @@ def tug(r):
     input("2/2  Hold the gripper and pull it GENTLY away from the robot (the way the arm extends), "
           "2-3 times, for 6 s. Press Enter and start ...")
     pull = record(r, 6.0)
-    suggest(still, pull)
+    suggest(still, pull, dt=0.02)
 
 
-def suggest(still, pull):
-    """Print --tug-threshold / --tug-sign from effort samples while still and while pulling."""
-    base, noise = statistics.fmean(still), statistics.pstdev(still)
-    lo, hi = min(pull) - base, max(pull) - base
-    change = lo if abs(lo) > abs(hi) else hi
-    print(f"still: mean {base:.2f}, noise (std) {noise:.2f} pct;  pulls: up to {change:+.2f} pct from that")
-    if abs(change) < 5 * noise or abs(change) < 1.0:
-        print("\nThe pulls barely changed the effort. Either the pull was too gentle, or the arm isn't "
-              "holding position: measure during a handoff instead (see tug-log in this file's help).")
-        return None
+def suggest(still, pull, dt, floor=3.0):
+    """What handoff_real.py's automatic tug detector would do with these effort samples
+    (still = nobody touching, pull = someone pulling), sampled every `dt` s.
+    Same rule as handoff_controller.py: average over tug_hold, threshold = max(floor,
+    tug_noise_k x the noise of that average)."""
+    lim = Limits()
+    w = max(1, round(lim.tug_hold / dt))
+
+    def avg(xs):
+        return [statistics.fmean(xs[i:i + w]) for i in range(len(xs) - w + 1)]
+    base = statistics.fmean(still)
+    noise = max(statistics.pstdev(avg(still)) if len(still) > w else 0.0,
+                statistics.pstdev(still) / w ** 0.5)       # same estimate as the controller
+    noise = (noise ** 2 + statistics.pstdev(still) ** 2 / len(still)) ** 0.5
+    threshold = max(floor, lim.tug_noise_k * noise)
+    pulled = [m - base for m in avg(pull)] or [0.0]
+    change = min(pulled) if abs(min(pulled)) > abs(max(pulled)) else max(pulled)
     sign = 1 if change < 0 else -1          # handoff_real.py expects pulls to make (sign * effort) drop
-    threshold = max(abs(change) / 2, 5 * noise)
-    print(f"\nUse:  --tug-threshold {threshold:.1f} --tug-sign {sign}")
-    print("(half of your pull, and at least 5x the noise. A gentler pull than this won't release the bottle.)")
-    return threshold, sign
+    released = abs(change) > threshold
+    print(f"still: mean {base:.2f} pct, noise of the {lim.tug_hold:g} s average {noise:.2f} -> "
+          f"automatic threshold {threshold:.2f}")
+    print(f"pulls (averaged over {lim.tug_hold:g} s): up to {change:+.2f} pct -> "
+          f"{'WOULD release the bottle' if released else 'would NOT release the bottle'}")
+    print(f"\n--tug-sign {sign}" + ("" if sign == 1 else "   (not the default: add it to the command)"))
+    if not released:
+        print("Pull a bit harder or longer (at least 1/4 s), or lower the floor with --tug-threshold "
+              f"(currently {floor:g}) if the threshold above is just the floor.")
+    return threshold, sign, released
 
 
 def tug_log(path):
@@ -126,7 +142,8 @@ def tug_log(path):
     if len(still) < 10 or len(pull) < 10:
         print("GIVE phase too short in this log")
         return None
-    return suggest(still, pull)
+    dt = statistics.median(b[0] - a[0] for a, b in zip(eff, eff[1:]))
+    return suggest(still, pull, dt)
 
 
 def main():

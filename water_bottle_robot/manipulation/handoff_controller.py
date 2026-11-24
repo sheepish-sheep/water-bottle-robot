@@ -86,11 +86,14 @@ class Limits:
     unfold_lift_max: float = 0.75   # m: unfold no higher than this (above it, the unfolding
                                     # gripper can hit the robot's own head)
     handback_timeout: float = 10.0  # s: if nobody tugs on the bottle by then, keep it (don't drop it)
-    tug_force: float = 2.5          # N: minimum pull (arm effort drop) that counts as "the person is
-                                    # pulling". The threshold is also >= 5x the measured noise.
-                                    # Must be re-measured on the real robot (its effort signal differs).
+    tug_force: float = 2.5          # N: smallest effort drop that can ever count as a pull (a floor).
+                                    # The actual threshold is set each time from the measured noise.
     tug_quiet: float = 0.4          # N std dev: the arm counts as settled below this
-    tug_hold: float = 0.25          # s the pull must last (not a blip)
+    tug_hold: float = 0.25          # s the pull must last (the detector averages over this)
+    tug_noise_window: float = 0.5   # s of extra still effort measured after settling (plus the 0.5 s settle
+                                    # window) to set the threshold. Short: the person grabs the bottle soon after
+    tug_noise_k: float = 5.0        # threshold = this x the noise of the averaged effort (or tug_force if larger).
+                                    # 5: over a 10 s wait (~200 windows) jitter alone basically never gets there
 
 
 @dataclass
@@ -208,12 +211,16 @@ class Result:
 
 
 def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: Result = None, give_back=True,
-                dry_run=False):
+                dry_run=False, stow=True):
     """Generator implementing the handoff FSM. `result` is filled in as it runs.
 
     dry_run: reach to the grasp point with the gripper open, hold there a few
     seconds, then retract and stow without grasping. For lining up the bottle
-    spot on the real robot."""
+    spot on the real robot.
+
+    stow: at the end, fold the gripper back next to the mast and lower the lift.
+    False leaves the arm retracted with the gripper still pointing out. Folding
+    is never done with something in the gripper (a bottle would slip out)."""
     res = result if result is not None else Result()
 
     def phase(name, note=""):
@@ -240,7 +247,16 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
         return ok
 
     def fold():
+        if not stow:
+            res.log.append(("NO_FOLD", "arm retracted; gripper left pointing out"))
+            return
         yield from grip("closed")    # close before folding back next to the mast
+        # e.g. the person didn't take the bottle after all. Only trusted when the robot can
+        # actually sense a held bottle; otherwise "closed" always reads as holding and it would
+        # never fold. We only get here after a dry run or after the person pulled the bottle away.
+        if getattr(robot, "senses_holding", True) and robot.gripper_holding():
+            res.log.append(("NO_FOLD", "something is in the gripper; not folding"))
+            return
         robot.move("lift", min(robot.joint("lift"), lim.unfold_lift_max), lim.lift_speed)
         yield from settle()
         robot.move("wrist_yaw", math.pi, lim.wrist_speed)
@@ -313,6 +329,8 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     phase("GRASP")
     yield from grip("closed")
     yield from robot.wait(0.4)
+    res.log.append(("CLOSED", "gripper closed and settled; holding" if robot.gripper_holding()
+                    else "gripper closed and settled; NOT holding"))
     if not robot.gripper_holding():
         yield from grip("open")
         robot.move("arm", 0.0, lim.arm_speed)
@@ -352,14 +370,34 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
                 break
             yield
             t += robot.dt
-        baseline = statistics.fmean(samples)
-        threshold = max(lim.tug_force, 5 * statistics.pstdev(samples))
-        res.log.append(("TUG_ARMED", f"baseline {baseline:.2f}, threshold {threshold:.2f} (N in sim, effort_pct on the robot)"))
-        pulled, t = 0, 0.0
+        # Measure the noise the detector will actually see. It compares the AVERAGE
+        # effort over tug_hold (a pull has to last that long anyway) to the baseline,
+        # so the threshold comes from how much that average jitters while nobody
+        # touches the bottle -- no hand-tuned number needed (tug_force is only a floor).
+        w = max(1, round(lim.tug_hold / robot.dt))
+        quiet, t = list(samples), 0.0
+        while t < lim.tug_noise_window:
+            quiet.append(robot.arm_effort())
+            yield
+            t += robot.dt
+        baseline = statistics.fmean(quiet)
+        means = [statistics.fmean(quiet[i:i + w]) for i in range(len(quiet) - w + 1)]
+        # Two estimates of the averaged signal's noise; take the larger. Directly measured
+        # from ~1 s it comes out low (few independent windows); raw std / sqrt(w) is right
+        # for uncorrelated jitter. Underestimating it means releasing on noise.
+        noise = max(statistics.pstdev(means) if len(means) > 1 else 0.0,
+                    statistics.pstdev(quiet) / math.sqrt(w))
+        # The baseline is itself an estimate (from len(quiet) samples); its error adds to
+        # the averaged jitter, so the threshold has to cover both.
+        noise = math.hypot(noise, statistics.pstdev(quiet) / math.sqrt(len(quiet)))
+        threshold = max(lim.tug_force, lim.tug_noise_k * noise)
+        res.log.append(("TUG_ARMED", f"baseline {baseline:.2f}, noise {noise:.2f}, threshold {threshold:.2f} "
+                                     "(N in sim, effort_pct on the robot)"))
+        recent, t = [], 0.0
         while t < lim.handback_timeout:
             # a pull AWAY from the robot makes the arm motor push back: effort drops
-            pulled = pulled + 1 if baseline - robot.arm_effort() > threshold else 0
-            if pulled * robot.dt >= lim.tug_hold:
+            recent = (recent + [robot.arm_effort()])[-w:]
+            if len(recent) == w and baseline - statistics.fmean(recent) > threshold:
                 break
             yield
             t += robot.dt

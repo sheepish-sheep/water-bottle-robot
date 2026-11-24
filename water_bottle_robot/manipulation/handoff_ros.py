@@ -42,14 +42,20 @@ class RosRobot(RobotInterface):
     STILL = {"lift": 0.005, "arm": 0.005}   # m/s; wrist joints use 0.05 rad/s
     GOAL_RETRY_S = 3.0
 
-    def __init__(self, node, spot, close_pct=-50.0, holding_pct=5.0, tug_sign=1.0, log=None,
-                 gripper_speed=None):
+    # "Open" asks for wider than any gripper opens; stretch_driver clips gripper goals to the
+    # robot's own range (fail_out_of_range_goal is off by default), so this means fully open.
+    # The textbook 50 pct opens our robot only part way: it reads ~290-330 pct fully open.
+    OPEN_PCT = 1000.0
+
+    def __init__(self, node, spot, close_pct=-80.0, holding_pct=None, tug_sign=1.0, log=None,
+                 gripper_speed=None, open_pct=None):
         from hello_helpers.gripper_conversion import GripperConversion
-        conv = GripperConversion()
+        self.conv = conv = GripperConversion()
         # same pct units as the stretch_body version, converted to the driver's finger angle (rad)
-        self.open_rad = conv.robotis_to_finger(50.0)
+        self.open_rad = conv.robotis_to_finger(self.OPEN_PCT if open_pct is None else open_pct)
         self.close_rad = conv.robotis_to_finger(close_pct)
-        self.holding_rad = conv.robotis_to_finger(holding_pct)
+        # None: no position check (closed = holding); see handoff_real --holding-pct
+        self.holding_rad = None if holding_pct is None else conv.robotis_to_finger(holding_pct)
         self.node, self.spot, self.tug_sign, self.log = node, spot, tug_sign, log
         self.gripper_speed = gripper_speed
         self.pending = {}          # joint name -> (position, speed); sent as one goal
@@ -84,7 +90,16 @@ class RosRobot(RobotInterface):
     def finger(self):
         return float(self._js(self.GRIPPER)[0])
 
+    def gripper_pct(self):
+        return float(self.conv.finger_to_robotis(self.finger()))
+
+    @property
+    def senses_holding(self):
+        return self.holding_rad is not None
+
     def gripper_holding(self):
+        if self.holding_rad is None:
+            return self.grip_cmd == "closed"
         return self.grip_cmd == "closed" and self.finger() > self.holding_rad
 
     def estimate_bottle(self):
@@ -210,7 +225,8 @@ def main(argv=None):
     print("connecting to the driver (stretch_driver / sim) ...")
     node, Bool = make_node()
     log_path, log_file, log = new_log(LOG_COLUMNS[:5] + ["finger_rad", "arm_effort_pct"])
-    rr = RosRobot(node, spot, args.close_pct, args.holding_pct, args.tug_sign, log, args.gripper_speed)
+    rr = RosRobot(node, spot, args.close_pct, args.holding_pct, args.tug_sign, log, args.gripper_speed,
+                  args.open_pct)
 
     def on_runstop(msg):
         rr.runstopped = bool(msg.data)
@@ -229,7 +245,7 @@ def main(argv=None):
         node.switch_to_position_mode()
         if not args.yes and not confirm():
             return 0
-        res = run(rr, kin, lim, args.dry_run)
+        res = run(rr, kin, lim, args.dry_run, args.stow)
         return 0 if res.ok else 3
     except Abort as e:
         print("\nABORTED:", e)

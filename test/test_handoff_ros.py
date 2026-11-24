@@ -91,7 +91,17 @@ def test_dry_run_goals_are_batched_with_explicit_speeds(clock):
     p = handoff_real.plan_reach((0, -0.70, 0.90), kin, lim)
     arm_targets = [g["wrist_extension"][0] for g in node.goals if "wrist_extension" in g]
     assert max(arm_targets) == pytest.approx(p.arm_grasp)
-    assert node.pos["wrist_extension"] == pytest.approx(0.0) and node.pos["joint_lift"] == pytest.approx(0.3)
+    # by default it doesn't fold or lower at the end: arm in, lift where it was, gripper still out
+    assert node.pos["wrist_extension"] == pytest.approx(0.0) and node.pos["joint_lift"] == pytest.approx(p.lift)
+    assert node.pos["joint_wrist_yaw"] == pytest.approx(0.0)
+
+
+def test_stow_folds_through_the_driver(clock):
+    node = FakeNode()
+    rr, kin, lim = make(node)
+    assert handoff_real.run(rr, kin, lim, dry_run=True, stow=True).ok
+    assert node.pos["joint_lift"] == pytest.approx(0.3)
+    assert node.pos["joint_wrist_yaw"] == pytest.approx(3.14159, abs=1e-3)
 
 
 def test_rejected_goal_is_retried(clock):
@@ -121,5 +131,8 @@ def test_gripper_targets_use_the_same_pct_units_as_stretch_body(clock):
     from hello_helpers.gripper_conversion import GripperConversion
     rr, _, _ = make(FakeNode())
     conv = GripperConversion()
-    assert rr.close_rad == pytest.approx(conv.robotis_to_finger(-50.0))
-    assert rr.close_rad < rr.holding_rad < rr.open_rad
+    assert rr.close_rad == pytest.approx(conv.robotis_to_finger(-80.0))       # default squeeze
+    assert rr.holding_rad is None                                            # no position check by default
+    assert rr.open_rad > conv.robotis_to_finger(330.0)   # wider than our robot opens: the driver clips it
+    rr2 = handoff_ros.RosRobot(FakeNode(), rr.spot, close_pct=-80.0, holding_pct=5.0)
+    assert rr2.close_rad < rr2.holding_rad < rr2.open_rad
