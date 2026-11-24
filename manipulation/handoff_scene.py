@@ -22,7 +22,6 @@ class BottleSpec:
     body_height: float = 0.20    # m, straight cylindrical part
     mass: float = 0.08           # kg (empty ~0.05-0.1; full 750 ml ~0.8)
     friction: float = 0.6        # sliding friction vs the rubber fingertips
-    tape_height: float = 0.17    # m above the base: the fill-line tape (opaque)
 
     @property
     def total_height(self):
@@ -44,8 +43,6 @@ def _bottle_xml(b: BottleSpec):
             friction="{b.friction} 0.02 0.001" {clear} group="1"/>
       <geom name="bottle_cap" type="cylinder" size="{r*0.5} 0.01" pos="0 0 {h + 0.06}" mass="0.005"
             rgba="0.15 0.35 0.85 1" group="1"/>
-      <geom name="bottle_tape" type="cylinder" size="{r + 0.0008} 0.006" pos="0 0 {b.tape_height}"
-            contype="0" conaffinity="0" mass="0" rgba="0.95 0.95 0.95 1" group="1"/>
       <geom name="bottle_water_hint" type="cylinder" size="{r*0.97} {h*0.15}" pos="0 0 {h*0.15}"
             contype="0" conaffinity="0" mass="0" rgba="0.35 0.6 1.0 0.25" group="1"/>
       <site name="bottle_grasp_ref" pos="0 0 {h*0.75}" size="0.004"/>

@@ -27,7 +27,7 @@ No ROS needed; it uses `stretch_mujoco`'s robot model directly.
 | File | What |
 |---|---|
 | `handoff_controller.py` | The behavior: planning math + the state machine. No MuJoCo or ROS: it talks to a small `RobotInterface` using only motions the real Stretch has (base rotate, lift, arm, wrist yaw/pitch/roll, gripper) at modest speeds. A real-robot version would implement the same interface on `stretch_body` / `stretch_core`. |
-| `handoff_scene.py` | The MuJoCo scene: Stretch, a clear bottle (cylinder + shoulder + cap, opaque tape band at the fill line), and a person whose hand holds the bottle (a weld that turns off when they let go). |
+| `handoff_scene.py` | The MuJoCo scene: Stretch, a clear bottle (cylinder + shoulder + cap; any ordinary bottle shape, no markings needed), and a person whose hand holds the bottle (a weld that turns off when they let go). |
 | `handoff_sim.py` | The sim robot (trapezoidal joint profiles, base heading loop), a perception stand-in (true pose + 1 cm noise), the scripted person, the checks, batches and video. |
 
 ## What it does (state machine)
