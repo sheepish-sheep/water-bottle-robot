@@ -200,11 +200,23 @@ def test_stow_option_folds_after_handing_back(env):
     assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(3.14159, abs=1e-3)
 
 
-def test_stow_folds_without_a_holding_check(env):
+def test_stow_folds_without_a_holding_check_and_doesnt_ask(env, monkeypatch):
     clock, install, _ = env
     robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
-    assert handoff_real.main(SPOT + ["--stow", "--yes"]) == 0       # default: no --holding-pct
-    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(3.14159, abs=1e-3)
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda msg="": asked.append(msg) or "")
+    assert handoff_real.main(SPOT + ["--stow", "--yes"]) == 0           # default: no --holding-pct
+    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(3.14159, abs=1e-3)  # folded
+    assert asked == []                                                    # no false "still holding" prompt
+
+
+def test_dry_run_with_stow_folds_and_doesnt_ask(env, monkeypatch):
+    clock, install, _ = env
+    robot = install()
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda msg="": asked.append(msg) or "")
+    assert handoff_real.main(SPOT + ["--dry-run", "--stow", "--yes"]) == 0
+    assert robot.lift.status["pos"] == pytest.approx(0.3) and asked == []
 
 
 def test_never_folds_with_something_in_the_gripper(env, monkeypatch):
