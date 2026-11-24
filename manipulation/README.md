@@ -5,7 +5,7 @@ upright (the pose it would carry it to the fountain in), and hands it back
 when the person tugs on it. This follows the instructor's simplification:
 take the bottle from a person's hand instead of picking it up.
 
-**Simulation only.** Nothing here sends commands to the real robot.
+Everything except `handoff_real.py` is simulation only. To run it on the real Stretch, see [REAL_ROBOT.md](REAL_ROBOT.md).
 
 ## Run it
 
@@ -29,6 +29,7 @@ No ROS needed; it uses `stretch_mujoco`'s robot model directly.
 | `handoff_controller.py` | The behavior: planning math + the state machine. No MuJoCo or ROS: it talks to a small `RobotInterface` using only motions the real Stretch has (base rotate, lift, arm, wrist yaw/pitch/roll, gripper) at modest speeds. A real-robot version would implement the same interface on `stretch_body` / `stretch_core`. |
 | `handoff_scene.py` | The MuJoCo scene: Stretch, a clear bottle (cylinder + shoulder + cap; any ordinary bottle shape, no markings needed), and a person whose hand holds the bottle (a weld that turns off when they let go). |
 | `handoff_sim.py` | The sim robot (trapezoidal joint profiles, base heading loop), a perception stand-in (true pose + 1 cm noise), the scripted person, the checks, batches and video. |
+| `handoff_real.py`, `handoff_real_check.py` | The **real robot** version (fixed bottle spot, no camera yet) on `stretch_body`, and read-only checks. Steps: [REAL_ROBOT.md](REAL_ROBOT.md). |
 
 ## What it does (state machine)
 

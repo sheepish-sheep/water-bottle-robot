@@ -207,8 +207,13 @@ class Result:
     timeouts: int = 0
 
 
-def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: Result = None, give_back=True):
-    """Generator implementing the handoff FSM. `result` is filled in as it runs."""
+def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: Result = None, give_back=True,
+                dry_run=False):
+    """Generator implementing the handoff FSM. `result` is filled in as it runs.
+
+    dry_run: reach to the grasp point with the gripper open, hold there a few
+    seconds, then retract and stow without grasping. For lining up the bottle
+    spot on the real robot."""
     res = result if result is not None else Result()
 
     def phase(name, note=""):
@@ -233,6 +238,16 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
             res.log.append(("TIMEOUT", res.phase + " gripper"))
             res.timeouts += 1
         return ok
+
+    def fold():
+        yield from grip("closed")    # close before folding back next to the mast
+        robot.move("lift", min(robot.joint("lift"), lim.unfold_lift_max), lim.lift_speed)
+        yield from settle()
+        robot.move("wrist_yaw", math.pi, lim.wrist_speed)
+        robot.move("wrist_pitch", -0.4, lim.wrist_speed)
+        yield from settle()
+        robot.move("lift", 0.3, lim.lift_speed)
+        yield from settle()
 
     # LOCATE + FACE
     phase("LOCATE")
@@ -283,6 +298,17 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     robot.move("arm", p.arm_grasp, lim.arm_approach_speed)
     yield from settle()
 
+    if dry_run:
+        phase("DRY_RUN", "at the grasp point with the gripper open; not grasping")
+        yield from robot.wait(4.0)
+        phase("STOW")
+        robot.move("arm", 0.0, lim.arm_speed)
+        yield from settle()
+        yield from fold()
+        phase("DONE")
+        res.ok = True
+        return
+
     # GRASP
     phase("GRASP")
     yield from grip("closed")
@@ -328,7 +354,7 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
             t += robot.dt
         baseline = statistics.fmean(samples)
         threshold = max(lim.tug_force, 5 * statistics.pstdev(samples))
-        res.log.append(("TUG_ARMED", f"baseline {baseline:.2f} N, threshold {threshold:.2f} N"))
+        res.log.append(("TUG_ARMED", f"baseline {baseline:.2f}, threshold {threshold:.2f} (N in sim, effort_pct on the robot)"))
         pulled, t = 0, 0.0
         while t < lim.handback_timeout:
             # a pull AWAY from the robot makes the arm motor push back: effort drops
@@ -354,13 +380,6 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     robot.move("arm", 0.0, lim.arm_speed)
     yield from settle()
     if give_back:
-        yield from grip("closed")    # close before folding back next to the mast
-        robot.move("lift", min(robot.joint("lift"), lim.unfold_lift_max), lim.lift_speed)
-        yield from settle()
-        robot.move("wrist_yaw", math.pi, lim.wrist_speed)
-        robot.move("wrist_pitch", -0.4, lim.wrist_speed)
-        yield from settle()
-        robot.move("lift", 0.3, lim.lift_speed)
-        yield from settle()
+        yield from fold()
     phase("DONE")
     res.ok = True
