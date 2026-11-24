@@ -323,6 +323,8 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     phase("GRASP")
     yield from grip("closed")
     yield from robot.wait(0.4)
+    res.log.append(("CLOSED", "gripper closed and settled; holding" if robot.gripper_holding()
+                    else "gripper closed and settled; NOT holding"))
     if not robot.gripper_holding():
         yield from grip("open")
         robot.move("arm", 0.0, lim.arm_speed)
