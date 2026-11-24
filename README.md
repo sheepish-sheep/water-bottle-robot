@@ -9,8 +9,9 @@ Stretch takes a bottle from a person, drives to the water fountain, fills it
 |---|---|
 | `navigation/` | Nav2 setup. `kitchen_nav.launch.py` starts Nav2 (planner, Regulated Pure Pursuit controller, recovery behaviors) for the sim, built on Hello Robot's `stretch_nav2` config. Its docstring explains every sim-specific choice. |
 | `sim/` | Simulator. `kitchen_sim.launch.py` starts the Stretch MuJoCo sim in the kitchen with a fixed spawn pose and optional extra boxes that aren't on the map. `spawn_driver.py` wraps Hello Robot's sim driver and fixes two of its bugs (see below). |
+| `manipulation/` | Bottle handoff in MuJoCo: Stretch takes a bottle a person holds out, holds it upright, and hands it back. `handoff_controller.py` is the behavior (no MuJoCo/ROS inside), `handoff_sim.py` runs it with randomized checks and renders video. See `manipulation/README.md`. |
 | `perception/` | `offered_bottle_detector.py`: webcam demo that finds the bottle a person is holding out (MediaPipe + YOLO). Not hooked up to ROS yet. |
-| `scripts/` | Things you run. `record_nav_demo.sh` (demo with the viewer, for recordings) and `run_nav_test.sh` (headless pass/fail test). |
+| `scripts/` | Things you run. `record_nav_demo.sh` (demo with the viewer, for recordings), `run_nav_test.sh` (headless pass/fail test), `record_handoff_demo.sh` (bottle-handoff video). |
 | `test/` | `nav_goal_test.py` sends a Nav2 goal and checks arrival; `contact_replay.py` replays the path in MuJoCo to check that no part of the robot touched anything. |
 
 ## Setup (once)
