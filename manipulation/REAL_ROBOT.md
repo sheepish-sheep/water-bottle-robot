@@ -1,7 +1,7 @@
 # Bottle handoff on the real Stretch (fixed-spot version)
 
 The same handoff as the simulation (raise, unfold, reach, grasp, wait for the
-person to let go, hold, hand back on a tug, stow), but **without the camera**:
+person to let go, hold, hand back on a tug, pull the arm in), but **without the camera**:
 the person holds the bottle at a spot you measure and mark beforehand, and you
 tell the robot where it is.
 
@@ -70,7 +70,7 @@ python3 manipulation/handoff_real.py --distance 0.70 --hand-top 0.83 --dry-run
 ```
 
 The robot raises, unfolds the gripper, opens it, reaches slowly to the grasp
-point, holds 4 s, then comes back and stows. Nothing is grasped.
+point, holds 4 s, then pulls the arm back in. Nothing is grasped.
 
 While it holds: the spot between the open fingers, about **5 cm in from the
 fingertips**, is where the bottle's center should be. Compare with your tape
@@ -132,6 +132,10 @@ with D and H from step 3 and T and S from step 4.
 
 If nobody pulls within 10 s, it keeps the bottle, retracts, and asks you to take
 it before opening the gripper. It never just drops it.
+
+At the end it leaves the arm pulled in with the gripper still pointing out; it
+doesn't fold the gripper back or lower the lift. Add `--stow` if you want that
+(it closes the gripper first and won't fold if anything is still in it).
 
 ## Tuning
 

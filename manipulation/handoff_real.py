@@ -6,7 +6,7 @@ the robot's right (the side the arm reaches), DIST meters from the middle of
 the base, with the top of their hand HAND_TOP meters above the floor. The
 robot runs the same state machine as the simulation (handoff_controller.py):
 raise, unfold, reach, grasp, wait for the person to let go, hold, hand back
-on a tug, stow.
+on a tug, pull the arm back in (add --stow to also fold the gripper away).
 
 Runs ON THE ROBOT's computer (stretch_body is preinstalled there). Only one
 program can drive the robot at a time: stop stretch_driver / ROS first.
@@ -227,6 +227,9 @@ def main(argv=None):
                     help="gripper close target (stretch_body pct; -100 = hardest squeeze). Default -50")
     ap.add_argument("--holding-pct", type=float, default=5.0,
                     help="gripper pct above which 'closed' means 'holding something' (0 = fingertips touch)")
+    ap.add_argument("--stow", action="store_true",
+                    help="at the end, fold the gripper back and lower the lift. Default: stop with the arm "
+                         "retracted and the gripper pointing out")
     ap.add_argument("--yes", action="store_true", help="don't ask before moving")
     args = ap.parse_args(argv)
 
@@ -272,7 +275,7 @@ def main(argv=None):
                     print("cancelled; nothing moved.")
                     return 0
             res = Result()
-            gen = run_handoff(sr, kin, lim, res, give_back=True, dry_run=args.dry_run)
+            gen = run_handoff(sr, kin, lim, res, give_back=True, dry_run=args.dry_run, stow=args.stow)
             t0, shown = time.time(), 0
             for _ in gen:
                 sr.check_safety()

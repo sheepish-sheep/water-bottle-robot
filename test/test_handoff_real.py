@@ -176,7 +176,8 @@ def test_dry_run_reaches_and_comes_back_without_grasping(env):
     p = handoff_real.plan_reach((0, -0.70, 0.90), handoff_real.Kinematics(), handoff_real.Limits())
     assert max(robot.arm.commands) == pytest.approx(p.arm_grasp)   # went to the grasp point
     assert robot.arm.status["pos"] == pytest.approx(0.0)          # and back
-    assert robot.lift.status["pos"] == pytest.approx(0.3)         # stowed
+    assert robot.lift.status["pos"] == pytest.approx(p.lift)      # not folded/lowered by default
+    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(0.0)   # gripper still out
     assert robot.stopped == 1
     assert len(os.listdir(logs)) == 1
 
@@ -187,8 +188,28 @@ def test_full_handoff_releases_on_tug(env):
     robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
     assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--yes"]) == 0
     g = robot.end_of_arm.get_joint("stretch_gripper")
+    assert g.status["pos_pct"] == pytest.approx(50.0)   # opened to hand it back, left open
+    assert robot.arm.status["pos"] == pytest.approx(0.0)
+    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(0.0)   # no fold
+
+
+def test_stow_option_folds_after_handing_back(env):
+    clock, install, _ = env
+    robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
+    assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--stow", "--yes"]) == 0
     assert robot.lift.status["pos"] == pytest.approx(0.3)
-    assert g.status["pos_pct"] < 0    # closed again for stowing (bottle handed back)
+    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(3.14159, abs=1e-3)
+
+
+def test_never_folds_with_something_in_the_gripper(env, monkeypatch):
+    clock, install, _ = env
+    # the tug "releases" the bottle, but the fake keeps it between the fingers whenever
+    # the arm is out, so closing before the fold finds it still there
+    robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
+    robot.end_of_arm.j["stretch_gripper"].bottle = lambda: True
+    monkeypatch.setattr("builtins.input", lambda msg="": "")
+    assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--stow", "--yes"]) == 0
+    assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(0.0)   # didn't fold
 
 
 def test_nobody_takes_it_back_keeps_it_and_asks_before_letting_go(env, monkeypatch):

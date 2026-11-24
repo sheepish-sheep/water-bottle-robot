@@ -208,12 +208,16 @@ class Result:
 
 
 def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: Result = None, give_back=True,
-                dry_run=False):
+                dry_run=False, stow=True):
     """Generator implementing the handoff FSM. `result` is filled in as it runs.
 
     dry_run: reach to the grasp point with the gripper open, hold there a few
     seconds, then retract and stow without grasping. For lining up the bottle
-    spot on the real robot."""
+    spot on the real robot.
+
+    stow: at the end, fold the gripper back next to the mast and lower the lift.
+    False leaves the arm retracted with the gripper still pointing out. Folding
+    is never done with something in the gripper (a bottle would slip out)."""
     res = result if result is not None else Result()
 
     def phase(name, note=""):
@@ -240,7 +244,13 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
         return ok
 
     def fold():
+        if not stow:
+            res.log.append(("NO_FOLD", "arm retracted; gripper left pointing out"))
+            return
         yield from grip("closed")    # close before folding back next to the mast
+        if robot.gripper_holding():  # e.g. the person didn't take the bottle after all
+            res.log.append(("NO_FOLD", "something is in the gripper; not folding"))
+            return
         robot.move("lift", min(robot.joint("lift"), lim.unfold_lift_max), lim.lift_speed)
         yield from settle()
         robot.move("wrist_yaw", math.pi, lim.wrist_speed)
