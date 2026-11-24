@@ -3,10 +3,9 @@ Stretch MuJoCo sim in the RoboCasa kitchen with a FIXED robot spawn pose.
 Same nodes as stretch_simulation/stretch_mujoco_driver.launch.py, but the driver
 is started through spawn_driver.py so the start pose and seed are repeatable.
 
-    ros2 launch ~/ros2_ws/src/water-bottle-robot/sim/kitchen_sim.launch.py \
+    ros2 launch water_bottle_robot kitchen_sim.launch.py \
         spawn_x:=3.5 spawn_y:=-1.2 spawn_yaw:=0 use_mujoco_viewer:=true
 """
-from pathlib import Path
 
 import launch_ros.parameter_descriptions
 from ament_index_python.packages import get_package_share_path
@@ -15,7 +14,6 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import Command, LaunchConfiguration as LC
 from launch_ros.actions import Node
 
-HERE = Path(__file__).resolve().parent
 
 ARGS = {
     # Defaults: facing the east counter, lidar ~0.3 m from it. Tested (fast
@@ -31,6 +29,7 @@ ARGS = {
     "use_mujoco_viewer": "true",
     "use_cameras": "false",
     "mode": "navigation",
+    "use_robocasa": "true",    # false: empty scene (no kitchen; spawn pose / wheel fix don't apply)
 }
 
 
@@ -55,7 +54,9 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "error"]))
 
     ld.add_action(ExecuteProcess(
-        cmd=["python3", str(HERE / "spawn_driver.py"),
+        # python3 -m (not an entry-point wrapper): the sim starts its physics in a
+        # multiprocessing 'spawn' child, which re-imports the main module by name.
+        cmd=["python3", "-m", "water_bottle_robot.sim.spawn_driver",
              "--spawn", LC("spawn_x"), LC("spawn_y"), LC("spawn_yaw"), "--seed", LC("seed"), ["--obstacles=", LC("obstacles")],
              "--ros-args",
              "-r", "__node:=stretch_mujoco_driver",
@@ -66,7 +67,7 @@ def generate_launch_description():
              "-p", ["mode:=", LC("mode")],
              "-p", ["use_mujoco_viewer:=", LC("use_mujoco_viewer")],
              "-p", ["use_cameras:=", LC("use_cameras")],
-             "-p", "use_robocasa:=true",
+             "-p", ["use_robocasa:=", LC("use_robocasa")],
              "-p", "robocasa_task:=PnPCounterToCab",
              "-p", ["robocasa_layout:=", LC("layout")],
              "-p", ["robocasa_style:=", LC("style")]],

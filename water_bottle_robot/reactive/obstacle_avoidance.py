@@ -8,11 +8,11 @@ Run INSIDE the humble container:
     cd ~/ament_ws && source install/setup.bash
     # terminal 1: launch the sim (stretch_simulation, like the workshop)
     # terminal 2: put the base in navigation mode, then run this
-    python3 obstacle_avoidance.py
+    ros2 run water_bottle_robot obstacle_avoidance
     # it stows the arm and aims the head first; to skip that:
-    python3 obstacle_avoidance.py --ros-args -p stow_on_start:=false
+    ros2 run water_bottle_robot obstacle_avoidance --ros-args -p stow_on_start:=false
     # override params if your topics are named differently:
-    python3 obstacle_avoidance.py --ros-args -p scan_topic:=/scan_filtered -p cmd_topic:=/stretch/cmd_vel
+    ros2 run water_bottle_robot obstacle_avoidance --ros-args -p scan_topic:=/scan_filtered -p cmd_topic:=/stretch/cmd_vel
     # also run depth_to_scan.py in another terminal so the head camera is used
 
 Check topic names first with:  ros2 topic list | grep -E "scan|cmd_vel"
