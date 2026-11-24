@@ -5,24 +5,47 @@ Stretch takes a bottle from a person, drives to the water fountain, fills it
 
 ## Layout
 
+A ROS 2 (ament_python) package, `water_bottle_robot`.
+
 | Folder | What's in it |
 |---|---|
-| `navigation/` | Nav2 setup. `kitchen_nav.launch.py` starts Nav2 (planner, Regulated Pure Pursuit controller, recovery behaviors) for the sim, built on Hello Robot's `stretch_nav2` config. Its docstring explains every sim-specific choice. |
-| `sim/` | Simulator. `kitchen_sim.launch.py` starts the Stretch MuJoCo sim in the kitchen with a fixed spawn pose and optional extra boxes that aren't on the map. `spawn_driver.py` wraps Hello Robot's sim driver and fixes two of its bugs (see below). |
-| `manipulation/` | Bottle handoff in MuJoCo: Stretch takes a bottle a person holds out, holds it upright, and hands it back. `handoff_controller.py` is the behavior (no MuJoCo/ROS inside), `handoff_sim.py` runs it with randomized checks and renders video. See `manipulation/README.md`. |
-| `perception/` | `offered_bottle_detector.py`: webcam demo that finds the bottle a person is holding out (MediaPipe + YOLO). Not hooked up to ROS yet. |
-| `scripts/` | Things you run. `record_nav_demo.sh` (demo with the viewer, for recordings), `run_nav_test.sh` (headless pass/fail test), `run_handoff_demo.sh` (bottle-handoff demo in MuJoCo). |
-| `test/` | `nav_goal_test.py` sends a Nav2 goal and checks arrival; `contact_replay.py` replays the path in MuJoCo to check that no part of the robot touched anything. |
+| `water_bottle_robot/navigation/` | `go_to_fountain.py`: drive to the nearest water fountain (Nav2 plans, reactive or Nav2 driving). |
+| `water_bottle_robot/reactive/` | `obstacle_avoidance.py`: the reactive obstacle-avoidance decision used by `go_to_fountain`. |
+| `water_bottle_robot/manipulation/` | Bottle handoff: Stretch takes a bottle a person holds out, holds it upright, and hands it back. MuJoCo sim with randomized checks (`handoff_sim`), and real-robot versions on `stretch_body` (`handoff_real`) and on Hello Robot's ROS driver (`handoff_ros`). See `docs/handoff.md` and `docs/handoff_real_robot.md`. |
+| `water_bottle_robot/perception/` | `offered_bottle_detector.py`: webcam demo that finds the bottle a person is holding out (MediaPipe + YOLO). Not hooked up to ROS yet. |
+| `water_bottle_robot/sim/` | `spawn_driver.py` wraps Hello Robot's MuJoCo driver: fixed spawn pose, off-map boxes, and fixes for two of its bugs (see below). |
+| `water_bottle_robot/tools/` | Sim test tools: `nav_goal_test` sends a Nav2 goal and checks arrival; `contact_replay` replays the path in MuJoCo to check that no part of the robot touched anything. |
+| `launch/` | `kitchen_sim.launch.py` (the MuJoCo kitchen with a fixed spawn) and `kitchen_nav.launch.py` (Nav2 for it: planner, Regulated Pure Pursuit controller, recovery behaviors, built on Hello Robot's `stretch_nav2`; its docstring explains every sim-specific choice). |
+| `scripts/` | Things you run. `record_nav_demo.sh` (demo with the viewer, for recordings), `run_nav_test.sh` (headless Nav2 pass/fail test), `run_handoff_demo.sh` (bottle-handoff demo in MuJoCo), `run_handoff_ros_sim.sh` (ROS handoff dry run against the MuJoCo driver). |
+| `test/` | pytest tests (`colcon test`). |
+| `docs/` | Handoff write-up and the real-robot procedure. |
+
+Commands (`ros2 run water_bottle_robot <name>`): `handoff_sim`, `handoff_real`,
+`handoff_real_check`, `handoff_ros`, `go_to_fountain`, `obstacle_avoidance`,
+`offered_bottle_detector`, `nav_goal_test`, `contact_replay`.
 
 ## Setup (once)
 
 Needs Hello Robot's `stretch_ros2` in `~/ament_ws` (with `stretch_simulation`
 and `stretch_nav2` built), `stretch_mujoco` installed, and the RoboCasa kitchen
-assets downloaded. Then in every terminal:
+assets downloaded. Clone this repo into a colcon workspace's `src/` (on the VM:
+`~/ros2_ws/src`; on the robot: `~/ament_ws/src`) and build it:
 
 ```bash
 source /opt/ros/humble/setup.bash && source ~/ament_ws/install/setup.bash
+cd ~/ros2_ws && colcon build --symlink-install --packages-select water_bottle_robot
 ```
+
+Then in every terminal:
+
+```bash
+source /opt/ros/humble/setup.bash && source ~/ament_ws/install/setup.bash && source ~/ros2_ws/install/setup.bash
+```
+
+With `--symlink-install`, edits to the Python files take effect without
+rebuilding; new files, launch files or commands need a rebuild. Tests:
+`colcon test --packages-select water_bottle_robot && colcon test-result --verbose`
+(or `python3 -m pytest test` in the repo).
 
 ## Running
 

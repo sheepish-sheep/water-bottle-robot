@@ -1,9 +1,9 @@
-"""Tests for manipulation/handoff_real.py against a FAKE stretch_body.
+"""Tests for water_bottle_robot/manipulation/handoff_real.py against a FAKE stretch_body.
 
 These check the program's logic (state machine wiring, safety stops, the
 "still holding the bottle" exit, argument checks) without a robot. They do not
 show the real robot behaves like the fake: that's what the staged tests in
-manipulation/REAL_ROBOT.md are for.
+docs/handoff_real_robot.md are for.
 
     python3 -m pytest test/test_handoff_real.py -q
 """
@@ -14,8 +14,7 @@ import types
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "manipulation"))
-import handoff_real  # noqa: E402
+from water_bottle_robot.manipulation import handoff_real
 
 
 class Clock:
@@ -245,7 +244,7 @@ def test_handoff_needs_a_measured_tug_threshold(env):
 
 
 def test_tug_threshold_from_a_run_log(env, monkeypatch, capsys):
-    import handoff_real_check
+    from water_bottle_robot.manipulation import handoff_real_check
     clock, install, logs = env
     # GIVE's arm stops at ~44 s; the person waits 3 s, then pulls (effort rises 12 pct: sign -1)
     install(effort=lambda t: 12.0 if 48 < t < 52 else 0.3 * ((t * 20) % 2))

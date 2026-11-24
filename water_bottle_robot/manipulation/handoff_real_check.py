@@ -3,10 +3,10 @@ Read-only checks on the real Stretch before the handoff. NOTHING HERE MOVES
 THE ROBOT: it only reads status. Run on the robot's computer, with
 stretch_driver / ROS stopped (only one program can talk to the robot).
 
-    python3 manipulation/handoff_real_check.py status   # homed? run-stop? battery, joints, gripper
-    python3 manipulation/handoff_real_check.py watch    # live joints + arm effort + gripper (Ctrl-C to stop)
-    python3 manipulation/handoff_real_check.py tug      # measure the tug threshold for handoff_real.py
-    python3 manipulation/handoff_real_check.py tug-log RUN.csv   # same, from a handoff_real.py run's log
+    ros2 run water_bottle_robot handoff_real_check status   # homed? run-stop? battery, joints, gripper
+    ros2 run water_bottle_robot handoff_real_check watch    # live joints + arm effort + gripper (Ctrl-C to stop)
+    ros2 run water_bottle_robot handoff_real_check tug      # measure the tug threshold for handoff_real.py
+    ros2 run water_bottle_robot handoff_real_check tug-log RUN.csv   # same, from a handoff_real.py run's log
 
 `tug`: with the arm out a bit and the gripper unfolded (put it there with
 the robot's usual tools, e.g. the Xbox controller / stretch_xbox_controller_teleop.py,

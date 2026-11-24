@@ -5,22 +5,20 @@ MuJoCo kitchen (robot in the settled 'stow' pose) and measure how close any
 robot part gets to the scene. Catches things the lidar can't see, like the
 base's back corner or the wrist hitting a countertop edge.
 
-    python3 test/contact_replay.py RUN_trace.json --spawn X Y YAW --obstacles "x,y" [--min-gap 0.02]
+    ros2 run water_bottle_robot contact_replay RUN_trace.json --spawn X Y YAW --obstacles "x,y" [--min-gap 0.02]
 
 Exit 0 if every robot part stayed at least --min-gap (m) from the scene.
 """
 import argparse
 import json
 import math
-import os
 import random
 import sys
 
 import mujoco
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sim"))
-from spawn_driver import add_obstacles  # noqa: E402
+from water_bottle_robot.sim.spawn_driver import add_obstacles
 
 MARGIN = 0.10  # m: report anything within 10 cm
 

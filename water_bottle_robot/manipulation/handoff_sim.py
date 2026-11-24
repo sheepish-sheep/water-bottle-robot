@@ -2,9 +2,9 @@
 """
 Run the Stretch bottle-handoff demo in MuJoCo.
 
-    python3 manipulation/handoff_sim.py --video ~/ros2_ws/artifacts/handoff.mp4   # render a video (headless)
-    python3 manipulation/handoff_sim.py --viewer                                    # watch live (needs a desktop)
-    python3 manipulation/handoff_sim.py --trials 50 --seed 1                        # randomized pass/fail batch
+    ros2 run water_bottle_robot handoff_sim --video ~/ros2_ws/artifacts/handoff.mp4   # render a video (headless)
+    ros2 run water_bottle_robot handoff_sim --viewer                                    # watch live (needs a desktop)
+    ros2 run water_bottle_robot handoff_sim --trials 50 --seed 1                        # randomized pass/fail batch
 
 The robot logic is handoff_controller.py; this file supplies the MuJoCo robot
 (speed-limited joint setpoints), a perception stand-in (true position + noise),
@@ -22,9 +22,8 @@ from dataclasses import asdict, dataclass, field
 import mujoco
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from handoff_controller import Kinematics, Limits, Result, RobotInterface, run_handoff  # noqa: E402
-from handoff_scene import BottleSpec, build_model, set_weld, yaw_quat  # noqa: E402
+from water_bottle_robot.manipulation.handoff_controller import Kinematics, Limits, Result, RobotInterface, run_handoff
+from water_bottle_robot.manipulation.handoff_scene import BottleSpec, build_model, set_weld, yaw_quat
 
 CTRL_DT = 0.01  # s, control/metrics rate
 

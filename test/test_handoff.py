@@ -6,12 +6,11 @@
 import math
 import os
 import random
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "manipulation"))
-from handoff_controller import Kinematics, Limits, grasp_height, plan_reach, plan_turn, rotate_into_base  # noqa: E402
+from water_bottle_robot.manipulation.handoff_controller import (
+    Kinematics, Limits, grasp_height, plan_reach, plan_turn, rotate_into_base)
 
 KIN, LIM = Kinematics(), Limits()
 
@@ -66,8 +65,8 @@ def test_bottle_on_top_of_base_is_rejected():
 @pytest.mark.slow
 def test_refuses_when_held_too_high():
     os.environ.setdefault("MUJOCO_GL", "egl")
-    import handoff_sim as hs
-    from handoff_scene import BottleSpec
+    from water_bottle_robot.manipulation import handoff_sim as hs
+    from water_bottle_robot.manipulation.handoff_scene import BottleSpec
     sc = hs.Scenario(bottle=BottleSpec(body_height=0.17), hold_height=0.10)
     r = hs.run_trial(sc)
     assert "lower" in r["reason"]
@@ -78,7 +77,7 @@ def test_refuses_when_held_too_high():
 @pytest.mark.parametrize("seed", [101, 202, 303])
 def test_full_handoff_in_sim(seed):
     os.environ.setdefault("MUJOCO_GL", "egl")
-    import handoff_sim as hs
+    from water_bottle_robot.manipulation import handoff_sim as hs
     sc = hs.random_scenario(random.Random(seed), seed)
     r = hs.run_trial(sc)
     assert r["passed"], (r["checks"], r["reason"], r["scenario"], r["bottle"])

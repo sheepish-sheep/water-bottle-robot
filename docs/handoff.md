@@ -5,7 +5,7 @@ upright (the pose it would carry it to the fountain in), and hands it back
 when the person tugs on it. This follows the instructor's simplification:
 take the bottle from a person's hand instead of picking it up.
 
-Everything except `handoff_real.py` is simulation only. To run it on the real Stretch, see [REAL_ROBOT.md](REAL_ROBOT.md).
+Everything except `handoff_real` and `handoff_ros` is simulation only. To run it on the real Stretch, see [handoff_real_robot.md](handoff_real_robot.md).
 
 ## Run it
 
@@ -14,22 +14,25 @@ scripts/run_handoff_demo.sh                      # tests, then the demo in the l
 scripts/run_handoff_demo.sh --azimuth -150       # person standing somewhere else (deg; -90 = robot's right)
 scripts/run_handoff_demo.sh --random --seed 7    # a randomized person and bottle
 
-python3 manipulation/handoff_sim.py --trials 20 --seed 1   # randomized pass/fail batch (headless)
-python3 manipulation/handoff_sim.py --video out.mp4         # render a video instead of the viewer
+ros2 run water_bottle_robot handoff_sim --trials 20 --seed 1   # randomized pass/fail batch (headless)
+ros2 run water_bottle_robot handoff_sim --video out.mp4         # render a video instead of the viewer
 python3 -m pytest test/test_handoff.py -q                  # planning tests (fast)
 python3 -m pytest test/test_handoff.py -q -m slow          # + full sim handoffs (~2 min)
 ```
 
-No ROS needed; it uses `stretch_mujoco`'s robot model directly.
+The sim doesn't use ROS nodes: it drives `stretch_mujoco`'s robot model in MuJoCo directly.
 
 ## Files
 
+In `water_bottle_robot/manipulation/`:
+
 | File | What |
 |---|---|
-| `handoff_controller.py` | The behavior: planning math + the state machine. No MuJoCo or ROS: it talks to a small `RobotInterface` using only motions the real Stretch has (base rotate, lift, arm, wrist yaw/pitch/roll, gripper) at modest speeds. A real-robot version would implement the same interface on `stretch_body` / `stretch_core`. |
+| `handoff_controller.py` | The behavior: planning math + the state machine. No MuJoCo or ROS: it talks to a small `RobotInterface` using only motions the real Stretch has (base rotate, lift, arm, wrist yaw/pitch/roll, gripper) at modest speeds. `handoff_real.py` implements it on `stretch_body`, `handoff_ros.py` on Hello Robot's ROS driver. |
 | `handoff_scene.py` | The MuJoCo scene: Stretch, a clear bottle (cylinder + shoulder + cap; any ordinary bottle shape, no markings needed), and a person whose hand holds the bottle (a weld that turns off when they let go). |
 | `handoff_sim.py` | The sim robot (trapezoidal joint profiles, base heading loop), a perception stand-in (true pose + 1 cm noise), the scripted person, the checks, batches and video. |
-| `handoff_real.py`, `handoff_real_check.py` | The **real robot** version (fixed bottle spot, no camera yet) on `stretch_body`, and read-only checks. Steps: [REAL_ROBOT.md](REAL_ROBOT.md). |
+| `handoff_real.py`, `handoff_real_check.py` | The **real robot** version (fixed bottle spot, no camera yet) on `stretch_body`, and read-only checks. Steps: [handoff_real_robot.md](handoff_real_robot.md). |
+| `handoff_ros.py` | The same real-robot handoff through Hello Robot's ROS driver (`hello_helpers` `HelloNode`, FollowJointTrajectory). `scripts/run_handoff_ros_sim.sh` runs its dry run against the MuJoCo ROS driver. |
 
 ## What it does (state machine)
 

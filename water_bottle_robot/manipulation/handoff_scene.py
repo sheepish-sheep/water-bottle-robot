@@ -119,7 +119,7 @@ WHEEL_KV = 180.0
 
 
 def fix_wheels(m):
-    """Same fix as sim/spawn_driver.py: stock gear=3 makes the base ~6x too slow."""
+    """Same fix as water_bottle_robot/sim/spawn_driver.py: stock gear=3 makes the base ~6x too slow."""
     for name in ("left_wheel_vel", "right_wheel_vel"):
         a = m.actuator(name)
         a.gear[0] = 1.0

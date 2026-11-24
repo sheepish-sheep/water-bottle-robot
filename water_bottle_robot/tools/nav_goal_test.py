@@ -2,8 +2,8 @@
 """
 Pass/fail Nav2 goal test against the running kitchen sim + kitchen_nav.launch.py.
 
-    python3 test/nav_goal_test.py --goal 1.25 -4.2 -90 [--timeout 120] [--out PREFIX]
-          [--obstacles "x,y;x,y"]   # only for drawing; spawn them via sim/kitchen_sim.launch.py
+    ros2 run water_bottle_robot nav_goal_test --goal 1.25 -4.2 -90 [--timeout 120] [--out PREFIX]
+          [--obstacles "x,y;x,y"]   # only for drawing; spawn them via kitchen_sim.launch.py
 
 Without --goal it only records (path, plan, costmap) until Ctrl+C -- use that
 while sending goals by hand from RViz. Ctrl+C always still writes the files.

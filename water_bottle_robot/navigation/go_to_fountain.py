@@ -3,26 +3,27 @@
 Drive Stretch to the NEAREST water fountain from wherever it starts.
 
 Nav2 plans the route on the map; by default our own reactive obstacle
-avoidance (reactive/obstacle_avoidance.py's decide()) does the driving.
+avoidance (water_bottle_robot/reactive/obstacle_avoidance.py's decide()) does the driving.
 
 Needs Nav2 running first (on the robot: the class repo's
 `ros2 launch parcs_stretch_nav2 navigation.launch.py teleop_type:=keyboard`).
 
-1) Record fountains once. Saved to navigation/fountains.yaml. Either:
+1) Record fountains once. Saved to ~/.ros/water_bottle_robot/fountains.yaml
+   (or $WBR_FOUNTAINS_FILE). Either:
    a) On the robot (most accurate): localize, drive it with teleop to where it
       should stop, FACING the fountain, then
-          python3 navigation/go_to_fountain.py --add-here east_hall
+          ros2 run water_bottle_robot go_to_fountain --add-here east_hall
       This saves the robot's current pose from AMCL/tf.
    b) From the map only (RViz "Publish Point" tool, two clicks):
-          python3 navigation/go_to_fountain.py --add east_hall
+          ros2 run water_bottle_robot go_to_fountain --add east_hall
       click 1 = floor spot where the robot should STOP (~0.6 m out from the fountain)
       click 2 = the fountain itself (sets which way the robot faces at the end)
    Repeat for each fountain. Re-using a name overwrites that fountain.
 
 2) Go:
-       python3 navigation/go_to_fountain.py                       # global localization + reactive driving
-       python3 navigation/go_to_fountain.py --localize manual     # you set "2D Pose Estimate" in RViz first
-       python3 navigation/go_to_fountain.py --controller nav2     # let Nav2's own controller drive instead
+       ros2 run water_bottle_robot go_to_fountain                       # global localization + reactive driving
+       ros2 run water_bottle_robot go_to_fountain --localize manual     # you set "2D Pose Estimate" in RViz first
+       ros2 run water_bottle_robot go_to_fountain --controller nav2     # let Nav2's own controller drive instead
 
 How it works:
   * Localize: --localize global calls AMCL's /reinitialize_global_localization
@@ -51,11 +52,11 @@ import time
 import numpy as np
 import yaml
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "reactive"))
-from obstacle_avoidance import DEFAULTS, clean_scan, decide, rear_min, wrap  # noqa: E402
+from water_bottle_robot.reactive.obstacle_avoidance import DEFAULTS, clean_scan, decide, rear_min, wrap
 
-FOUNTAINS_FILE = os.path.join(HERE, "fountains.yaml")
+# Outside the package: an installed package's own folder gets overwritten on every rebuild.
+FOUNTAINS_FILE = os.environ.get("WBR_FOUNTAINS_FILE",
+                                os.path.expanduser("~/.ros/water_bottle_robot/fountains.yaml"))
 
 
 # ---------- pure geometry (no ROS, testable anywhere) ----------
@@ -101,6 +102,7 @@ def load_fountains(path=FOUNTAINS_FILE):
 
 
 def save_fountains(fountains, path=FOUNTAINS_FILE):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         yaml.safe_dump({"fountains": fountains}, f, sort_keys=False)
 

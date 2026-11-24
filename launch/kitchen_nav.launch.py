@@ -1,7 +1,7 @@
 """
-Nav2 for the MuJoCo kitchen sim (start sim/kitchen_sim.launch.py first, mode navigation).
+Nav2 for the MuJoCo kitchen sim (start kitchen_sim.launch.py first, mode navigation).
 
-    ros2 launch ~/ros2_ws/src/water-bottle-robot/navigation/kitchen_nav.launch.py [controller:=rpp|dwb]
+    ros2 launch water_bottle_robot kitchen_nav.launch.py [controller:=rpp|dwb]
 
 What it runs: map_server (prebuilt G-shaped Modern_1 map) + Hello Robot's
 stretch_nav2 navigation stack (planner, controller, behaviors, bt_navigator),

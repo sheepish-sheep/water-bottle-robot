@@ -7,7 +7,7 @@
 #
 # Without a desktop (e.g. over SSH) it runs the demo headless and prints pass/fail.
 set -e
-REPO=$(cd "$(dirname "$0")/.." && pwd)
+source "$(dirname "$0")/_env.sh"
 cd "$REPO"
 
 echo "== 1/2 planning tests =="
@@ -16,8 +16,8 @@ python3 -m pytest test/test_handoff.py -q
 echo "== 2/2 handoff demo =="
 if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
   unset MUJOCO_GL
-  python3 manipulation/handoff_sim.py --viewer "$@"
+  "$WBR_BIN/handoff_sim" --viewer "$@"
 else
   echo "(no display: running headless)"
-  MUJOCO_GL=egl python3 manipulation/handoff_sim.py "$@"
+  MUJOCO_GL=egl "$WBR_BIN/handoff_sim" "$@"
 fi

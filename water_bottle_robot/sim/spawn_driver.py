@@ -4,7 +4,7 @@ Run Hello Robot's stretch_mujoco_driver, but with a fixed robot spawn pose and
 random seed in the RoboCasa kitchen (the stock driver always uses the kitchen's
 default/random spawn, and objects are re-randomized each launch).
 
-    python3 spawn_driver.py --spawn X Y YAW_DEG [--seed N] --ros-args <driver params>
+    python3 -m water_bottle_robot.sim.spawn_driver --spawn X Y YAW_DEG [--seed N] --ros-args <driver params>
 
 X, Y are kitchen world coordinates in meters (same as /odom in the sim),
 YAW_DEG is the heading (0 = +x). Normally started by kitchen_sim.launch.py.
@@ -82,9 +82,62 @@ def fix_zero_move_by():
     StretchMujocoSimulator.move_by = move_by
 
 
+def fix_wheel_wait():
+    """
+    The driver's FollowJointTrajectory server ends every goal by waiting on the
+    wheel actuators with wait_while_is_moving(), which this stretch_mujoco version
+    rejects for wheels ("Please use `get_position()` for left_wheel_vel"). So
+    every arm/lift/wrist/gripper goal ends in an exception and is reported as
+    aborted (the joints still move). The wait only matters for base velocity
+    commands sent through the action, which nothing here uses: skip it for wheels.
+    """
+    from stretch_mujoco import StretchMujocoSimulator
+    from stretch_mujoco.enums.actuators import Actuators
+
+    original = StretchMujocoSimulator.wait_while_is_moving
+
+    def wait_while_is_moving(self, actuator, *a, **kw):
+        if actuator in (Actuators.left_wheel_vel, Actuators.right_wheel_vel, "left_wheel_vel", "right_wheel_vel"):
+            return True
+        return original(self, actuator, *a, **kw)
+
+    StretchMujocoSimulator.wait_while_is_moving = wait_while_is_moving
+
+
+def fix_lost_move_to():
+    """
+    stretch_mujoco race: each physics step reads the whole command record, marks
+    the commands it used as done, and writes the whole record back. A move_to
+    the driver writes in between is overwritten and silently dropped (seen as a
+    wrist pitch goal that sometimes never moves). After each move_to, check that
+    the sim's command record holds it, and resend if it was lost.
+    """
+    import time
+
+    from stretch_mujoco import StretchMujocoSimulator
+    from stretch_mujoco.enums.actuators import Actuators
+
+    original = StretchMujocoSimulator.move_to
+
+    def move_to(self, actuator, pos):
+        original(self, actuator, pos)
+        name = actuator.name if isinstance(actuator, Actuators) else Actuators[actuator].name
+        for _ in range(25):
+            time.sleep(0.02)
+            cmd = self.data_proxies.get_command().move_to.get(name)
+            if cmd is not None and cmd.pos == pos:
+                return
+            original(self, actuator, pos)
+        print(f"[spawn_driver] move_to({name}, {pos}) kept getting dropped by the sim", flush=True)
+
+    StretchMujocoSimulator.move_to = move_to
+
+
 def main():
     args = parse()
     fix_zero_move_by()
+    fix_wheel_wait()
+    fix_lost_move_to()
     random.seed(args.seed)
     np.random.seed(args.seed)
 

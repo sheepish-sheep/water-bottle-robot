@@ -12,9 +12,9 @@ Runs ON THE ROBOT's computer (stretch_body is preinstalled there). Only one
 program can drive the robot at a time: stop stretch_driver / ROS first.
 
     # 1. line up the spot: reach there with the gripper open, don't grasp
-    python3 manipulation/handoff_real.py --distance 0.70 --hand-top 0.83 --dry-run
+    ros2 run water_bottle_robot handoff_real --distance 0.70 --hand-top 0.83 --dry-run
     # 2. the handoff (tug threshold measured with handoff_real_check.py tug)
-    python3 manipulation/handoff_real.py --distance 0.70 --hand-top 0.83 --tug-threshold 8 --tug-sign 1
+    ros2 run water_bottle_robot handoff_real --distance 0.70 --hand-top 0.83 --tug-threshold 8 --tug-sign 1
 
 Safety: it asks before moving, runs at half speed by default (--speed), stops
 everything on Ctrl-C or the run-stop button, and stops if any motion doesn't
@@ -31,10 +31,10 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from handoff_controller import Kinematics, Limits, Result, RobotInterface, grasp_height, plan_reach, run_handoff  # noqa: E402
+from water_bottle_robot.manipulation.handoff_controller import (
+    Kinematics, Limits, Result, RobotInterface, grasp_height, plan_reach, run_handoff)
 
-LOG_DIR = os.path.expanduser("~/ament_ws/artifacts/handoff_real")
+LOG_DIR = os.path.expanduser(os.environ.get("WBR_LOG_DIR", "~/ament_ws/artifacts/handoff_real"))
 
 
 class Abort(Exception):
@@ -206,8 +206,8 @@ def describe(spot, kin, lim):
     return z, p
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def add_handoff_args(ap):
+    """Options shared by the stretch_body (handoff_real) and ROS (handoff_ros) versions."""
     ap.add_argument("--distance", type=float, required=True,
                     help="m, sideways from the middle of the base (between the drive wheels) to the bottle's "
                          "center, on the robot's right. Works for about 0.53-0.84")
@@ -218,23 +218,24 @@ def main(argv=None):
                     help="reach to the grasp point with the gripper open, hold 4 s, come back. No grasp")
     ap.add_argument("--tug-threshold", type=float,
                     help="arm effort change (effort_pct) that counts as the person pulling. "
-                         "Measure it with handoff_real_check.py tug. Required unless --dry-run")
+                         "Measure it with handoff_real_check tug. Required unless --dry-run")
     ap.add_argument("--tug-sign", type=float, default=1.0, choices=[1.0, -1.0],
                     help="+1 if pulling the gripper away from the robot makes arm effort go DOWN, -1 if UP "
-                         "(handoff_real_check.py tug tells you)")
+                         "(handoff_real_check tug tells you)")
     ap.add_argument("--speed", type=float, default=0.5, help="fraction of the sim speeds (default 0.5)")
     ap.add_argument("--close-pct", type=float, default=-50.0,
                     help="gripper close target (stretch_body pct; -100 = hardest squeeze). Default -50")
     ap.add_argument("--holding-pct", type=float, default=5.0,
                     help="gripper pct above which 'closed' means 'holding something' (0 = fingertips touch)")
     ap.add_argument("--yes", action="store_true", help="don't ask before moving")
-    args = ap.parse_args(argv)
 
+
+def plan_from_args(ap, args):
+    """Check the options and print the plan. Returns (kin, lim, spot), or None if the spot can't work."""
     if not 0.1 <= args.speed <= 1.0:
         ap.error("--speed must be between 0.1 and 1.0")
     if not args.dry_run and args.tug_threshold is None:
-        ap.error("--tug-threshold is required for a real handoff (measure it: handoff_real_check.py tug)")
-
+        ap.error("--tug-threshold is required for a real handoff (measure it: handoff_real_check tug)")
     kin, lim = Kinematics(), build_limits(args)
     spot = fixed_spot(args.distance, args.hand_top, kin, lim)
     z, plan = describe(spot, kin, lim)
@@ -243,7 +244,73 @@ def main(argv=None):
           f"speed x{args.speed}, {'DRY RUN (no grasp)' if args.dry_run else 'full handoff'}")
     if not plan.feasible:
         print("can't do this spot:", plan.reason)
+        return None
+    return kin, lim, spot
+
+
+def confirm():
+    print("\nThe robot will raise its lift, unfold the gripper and reach out to its RIGHT.")
+    print("Clear the area, keep a hand on the run-stop.")
+    if input("Type 'go' to start: ").strip().lower() != "go":
+        print("cancelled; nothing moved.")
+        return False
+    return True
+
+
+def run(robot, kin, lim, dry_run):
+    """Step the handoff state machine on `robot` (StretchRobot or the ROS one), printing each phase.
+    The robot provides dt, check_safety(), sample(t) and a `phase` attribute."""
+    res = Result()
+    gen = run_handoff(robot, kin, lim, res, give_back=True, dry_run=dry_run)
+    t0, shown = time.time(), 0
+    for _ in gen:
+        robot.check_safety()
+        while shown < len(res.log):
+            name, note = res.log[shown]
+            print(f"[{time.time() - t0:6.1f}s] {name} {note}")
+            shown += 1
+        robot.phase = res.phase
+        robot.sample(time.time() - t0)
+        time.sleep(robot.dt)
+    for name, note in res.log[shown:]:
+        print(f"[{time.time() - t0:6.1f}s] {name} {note}")
+    print("\nRESULT:", "OK" if res.ok else f"FAILED in {res.phase}: {res.reason}")
+    return res
+
+
+def hand_over_if_holding(robot):
+    """Shutting down can let the gripper go limp: don't drop the bottle."""
+    if robot and robot.gripper_holding():
+        try:
+            input("The robot is still holding the bottle. Take hold of it and press Enter to open the gripper.")
+            robot.set_gripper("open")
+            if hasattr(robot, "flush"):   # the ROS robot sends commands in batches
+                robot.flush()
+            time.sleep(1.5)
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+
+def new_log(columns):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    path = os.path.join(LOG_DIR, time.strftime("run_%Y%m%d_%H%M%S.csv"))
+    f = open(path, "w", newline="")
+    w = csv.writer(f)
+    w.writerow(columns)
+    return path, f, w
+
+
+LOG_COLUMNS = ["t", "phase", "lift", "arm", "wrist_yaw", "gripper_pct", "arm_effort_pct"]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_handoff_args(ap)
+    args = ap.parse_args(argv)
+    planned = plan_from_args(ap, args)
+    if planned is None:
         return 2
+    kin, lim, spot = planned
 
     import stretch_body.robot   # only on the robot
     robot = stretch_body.robot.Robot()
@@ -251,8 +318,7 @@ def main(argv=None):
         print("couldn't connect to the robot. Is stretch_driver / another program using it? "
               "Stop it (or run stretch_free_robot_process.py) and try again.")
         return 1
-    os.makedirs(LOG_DIR, exist_ok=True)
-    log_path = os.path.join(LOG_DIR, time.strftime("run_%Y%m%d_%H%M%S.csv"))
+    log_path, log_file, log = new_log(LOG_COLUMNS)
     sr = None
     try:
         if not robot.is_homed():
@@ -261,32 +327,11 @@ def main(argv=None):
         if robot.pimu.status.get("runstop_event"):
             print("run-stop is pressed: release it (hold the button ~1 s) and try again.")
             return 1
-        with open(log_path, "w", newline="") as f:
-            log = csv.writer(f)
-            log.writerow(["t", "phase", "lift", "arm", "wrist_yaw", "gripper_pct", "arm_effort_pct"])
-            sr = StretchRobot(robot, spot, args.close_pct, args.holding_pct, args.tug_sign, log)
-            if not args.yes:
-                print("\nThe robot will raise its lift, unfold the gripper and reach out to its RIGHT.")
-                print("Clear the area, keep a hand on the run-stop.")
-                if input("Type 'go' to start: ").strip().lower() != "go":
-                    print("cancelled; nothing moved.")
-                    return 0
-            res = Result()
-            gen = run_handoff(sr, kin, lim, res, give_back=True, dry_run=args.dry_run)
-            t0, shown = time.time(), 0
-            for _ in gen:
-                sr.check_safety()
-                while shown < len(res.log):
-                    name, note = res.log[shown]
-                    print(f"[{time.time() - t0:6.1f}s] {name} {note}")
-                    shown += 1
-                sr.phase = res.phase
-                sr.sample(time.time() - t0)
-                time.sleep(sr.dt)
-            for name, note in res.log[shown:]:
-                print(f"[{time.time() - t0:6.1f}s] {name} {note}")
-            print("\nRESULT:", "OK" if res.ok else f"FAILED in {res.phase}: {res.reason}")
-            return 0 if res.ok else 3
+        sr = StretchRobot(robot, spot, args.close_pct, args.holding_pct, args.tug_sign, log)
+        if not args.yes and not confirm():
+            return 0
+        res = run(sr, kin, lim, args.dry_run)
+        return 0 if res.ok else 3
     except Abort as e:
         print("\nABORTED:", e)
         if sr:
@@ -298,14 +343,8 @@ def main(argv=None):
             sr.halt()
         return 4
     finally:
-        if sr and sr.gripper_holding():
-            # shutting down can let the gripper go limp: don't drop the bottle
-            try:
-                input("The robot is still holding the bottle. Take hold of it and press Enter to open the gripper.")
-                sr.set_gripper("open")
-                time.sleep(1.5)
-            except (EOFError, KeyboardInterrupt):
-                pass
+        hand_over_if_holding(sr)
+        log_file.close()
         print("log:", log_path)
         robot.stop()
 
