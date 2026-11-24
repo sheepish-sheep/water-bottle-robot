@@ -278,13 +278,13 @@ def main(argv=None):
                 sr.check_safety()
                 while shown < len(res.log):
                     name, note = res.log[shown]
-                    print(f"[{time.time() - t0:6.1f}s] {name} {note}")
+                    print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct, holding if > {sr.holding_pct:g})", flush=True)
                     shown += 1
                 sr.phase = res.phase
                 sr.sample(time.time() - t0)
                 time.sleep(sr.dt)
             for name, note in res.log[shown:]:
-                print(f"[{time.time() - t0:6.1f}s] {name} {note}")
+                print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct, holding if > {sr.holding_pct:g})", flush=True)
             print("\nRESULT:", "OK" if res.ok else f"FAILED in {res.phase}: {res.reason}")
             return 0 if res.ok else 3
     except Abort as e:
