@@ -12,7 +12,7 @@ A ROS 2 (ament_python) package, `water_bottle_robot`.
 | `water_bottle_robot/navigation/` | `go_to_fountain.py`: drive to the nearest water fountain (Nav2 plans, reactive or Nav2 driving). |
 | `water_bottle_robot/reactive/` | `obstacle_avoidance.py`: the reactive obstacle-avoidance decision used by `go_to_fountain`. |
 | `water_bottle_robot/manipulation/` | Bottle handoff: Stretch takes a bottle a person holds out, holds it upright, and hands it back. MuJoCo sim with randomized checks (`handoff_sim`), and real-robot versions on `stretch_body` (`handoff_real`) and on Hello Robot's ROS driver (`handoff_ros`). See `docs/handoff.md` and `docs/handoff_real_robot.md`. |
-| `water_bottle_robot/perception/` | `offered_bottle_detector.py`: webcam demo that finds the bottle a person is holding out (MediaPipe + YOLO). Not hooked up to ROS yet. |
+| `water_bottle_robot/perception/` | `gripper_bottle_detector.py`: ROS node that finds the bottle in the gripper camera (YOLO) and publishes where it is; `handoff_ros --camera` uses it to line up before grasping ([docs/gripper_camera.md](docs/gripper_camera.md)). `offered_bottle_detector.py`: webcam demo that finds the bottle a person is holding out (MediaPipe + YOLO). |
 | `water_bottle_robot/sim/` | `spawn_driver.py` wraps Hello Robot's MuJoCo driver: fixed spawn pose, off-map boxes, and fixes for two of its bugs (see below). |
 | `water_bottle_robot/tools/` | Sim test tools: `nav_goal_test` sends a Nav2 goal and checks arrival; `contact_replay` replays the path in MuJoCo to check that no part of the robot touched anything. |
 | `launch/` | `kitchen_sim.launch.py` (the MuJoCo kitchen with a fixed spawn) and `kitchen_nav.launch.py` (Nav2 for it: planner, Regulated Pure Pursuit controller, recovery behaviors, built on Hello Robot's `stretch_nav2`; its docstring explains every sim-specific choice). |
@@ -22,7 +22,7 @@ A ROS 2 (ament_python) package, `water_bottle_robot`.
 
 Commands (`ros2 run water_bottle_robot <name>`): `handoff_sim`, `handoff_real`,
 `handoff_real_check`, `handoff_ros`, `go_to_fountain`, `obstacle_avoidance`,
-`offered_bottle_detector`, `nav_goal_test`, `contact_replay`.
+`offered_bottle_detector`, `gripper_bottle_detector`, `nav_goal_test`, `contact_replay`.
 
 ## Setup (once)
 

@@ -92,6 +92,16 @@ class Limits:
     tug_hold: float = 0.25          # s the pull must last (the detector averages over this)
     tug_noise_window: float = 0.5   # s of extra still effort measured after settling (plus the 0.5 s settle
                                     # window) to set the threshold. Short: the person grabs the bottle soon after
+    # ALIGN (only with a gripper camera): look at the bottle from short of the grasp, then
+    # correct the base (forward/back) and the reach. Small corrections only: a bigger miss
+    # means the spot or the detection is wrong, and the robot shouldn't chase it.
+    align_look_back: float = 0.15   # m: arm stops this far short of the planned grasp to look
+    align_tol: float = 0.01         # m: off the arm line by less than this -> no base move
+    align_max_shift: float = 0.08   # m: largest total base correction
+    align_max_reach: float = 0.10   # m: largest change of the planned arm extension
+    align_samples: int = 5          # camera estimates to take the median of
+    align_timeout: float = 4.0      # s to collect them
+    base_speed: float = 0.04        # m/s for the base correction
     tug_noise_k: float = 5.0        # threshold = this x the noise of the averaged effort (or tug_force if larger).
                                     # 5: over a 10 s wait (~200 windows) jitter alone basically never gets there
 
@@ -178,6 +188,16 @@ class RobotInterface:
         """True if the fingers are stalled on an object (closed command, not fully closed)."""
         raise NotImplementedError
 
+    def see_bottle(self):
+        """Optional (gripper camera). Newest camera estimate of the bottle's axis in the
+        CURRENT base frame as (seq, (x, y, z)), seq increasing with each new estimate,
+        or None. Robots without a camera don't define it."""
+        raise NotImplementedError
+
+    def translate_base(self, dx, speed):
+        """Optional: drive the base dx meters straight forward (+) / back (-)."""
+        raise NotImplementedError
+
     def estimate_bottle(self):
         """Perception, in the current base frame, or None if not seen:
         {"axis_xy": (x, y) of the bottle's axis, "top_z": top of the bottle,
@@ -211,7 +231,7 @@ class Result:
 
 
 def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: Result = None, give_back=True,
-                dry_run=False, stow=True):
+                dry_run=False, stow=True, align=False):
     """Generator implementing the handoff FSM. `result` is filled in as it runs.
 
     dry_run: reach to the grasp point with the gripper open, hold there a few
@@ -219,7 +239,10 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     spot on the real robot.
 
     stow: at the end, fold the gripper back next to the mast and lower the lift.
-    False leaves the arm retracted with the gripper still pointing out. Folding
+    False leaves the arm retracted with the gripper still pointing out.
+
+    align: after unfolding, look at the bottle with the gripper camera
+    (robot.see_bottle) and correct the base and the reach before grasping. Folding
     is never done with something in the gripper (a bottle would slip out)."""
     res = result if result is not None else Result()
 
@@ -265,6 +288,61 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
         robot.move("lift", 0.3, lim.lift_speed)
         yield from settle()
 
+    def camera_estimate():
+        """Median of up to align_samples NEW camera estimates, or None."""
+        pts, last, t = [], None, 0.0
+        while len(pts) < lim.align_samples and t < lim.align_timeout:
+            seen = robot.see_bottle()
+            if seen is not None and seen[0] != last:
+                last = seen[0]
+                pts.append(seen[1])
+            yield
+            t += robot.dt
+        if len(pts) < 3:
+            return None
+        return tuple(statistics.median(c[i] for c in pts) for i in range(3))
+
+    def align_on_bottle(p):
+        """ALIGN: correct the base (bottle onto the arm's line) and the reach. False = failed
+        (already retracted, res filled in)."""
+        planned = p.arm_grasp
+        phase("ALIGN", "looking at the bottle with the gripper camera")
+        robot.move("arm", max(kin.arm_min, p.arm_grasp - lim.align_look_back), lim.arm_speed)
+        yield from settle()
+
+        def give_up(why):
+            robot.move("arm", 0.0, lim.arm_speed)
+            yield from settle()
+            fail(why)
+            return False
+        shifted = 0.0
+        for attempt in range(3):
+            est = yield from camera_estimate()
+            if est is None:
+                return (yield from give_up("the gripper camera doesn't see the bottle"))
+            bx, by, bz = est
+            off = bx - kin.gx                              # + = bottle ahead of the arm's line
+            arm_grasp = kin.gy0 - by + lim.grasp_depth
+            res.log.append(("SEEN", f"bottle {off * 100:+.1f} cm off the arm line, {(arm_grasp - planned) * 100:+.1f} "
+                                    f"cm from the planned reach, at height {bz:.2f} m"))
+            if abs(shifted + off) > lim.align_max_shift or abs(arm_grasp - planned) > lim.align_max_reach:
+                return (yield from give_up(
+                    f"bottle is {(shifted + off) * 100:+.0f} cm / {(arm_grasp - planned) * 100:+.0f} cm from the "
+                    "measured spot: check --distance and where the person stands"))
+            if not (lim.arm_reach_min <= arm_grasp <= kin.arm_max - lim.arm_headroom):
+                return (yield from give_up(f"bottle needs arm {arm_grasp:.2f} m: out of reach"))
+            if abs(off) <= lim.align_tol:
+                break
+            robot.translate_base(off, lim.base_speed)    # base +x carries the arm's line toward the bottle
+            yield from settle()
+            shifted += off
+        else:
+            return (yield from give_up("couldn't line up with the bottle (it keeps moving?)"))
+        p.arm_grasp = arm_grasp
+        p.arm_pregrasp = max(robot.joint("arm"), arm_grasp - lim.pregrasp_standoff)
+        res.log.append(("ALIGNED", f"base moved {shifted * 100:+.1f} cm, arm {planned:.3f} -> {arm_grasp:.3f}"))
+        return True
+
     # LOCATE + FACE
     phase("LOCATE")
     est = robot.estimate_bottle()
@@ -306,6 +384,11 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
     if p.lift > lim.unfold_lift_max:
         robot.move("lift", p.lift, lim.lift_speed)
         yield from settle()
+
+    if align:
+        ok = yield from align_on_bottle(p)
+        if not ok:
+            return
 
     # REACH: fast to pre-grasp, slow the last few cm
     phase("REACH", f"arm {p.arm_pregrasp:.2f} -> {p.arm_grasp:.2f}")

@@ -9,6 +9,8 @@ hello_helpers' HelloNode, instead of talking to stretch_body directly.
     # robot, terminal 2
     ros2 run water_bottle_robot handoff_ros --distance 0.70 --hand-top 0.83 --dry-run
     ros2 run water_bottle_robot handoff_ros --distance 0.70 --hand-top 0.83 --tug-threshold 8 --tug-sign 1
+    # with the gripper camera lining it up (needs d405_basic.launch.py + gripper_bottle_detector)
+    ros2 run water_bottle_robot handoff_ros --distance 0.70 --hand-top 0.83 --camera
 
 Same options, safety stops and log as handoff_real (see docs/handoff_real_robot.md).
 In sim (scripts/run_handoff_ros_sim.sh) only the dry run is meaningful: the sim
@@ -64,6 +66,47 @@ class RosRobot(RobotInterface):
         self.phase = ""
         self.runstopped = False
         self._lock = threading.Lock()
+        self.base_future = None    # result of the last base goal (translate), None = no base motion
+        self.camera = None         # (seq, (x, y, z) in base_link, wall time) from /gripper_bottle/point
+        self._cam_seq = 0
+
+    # --- gripper camera (optional: --camera) ---
+    CAMERA_MAX_AGE = 0.5   # s: older estimates count as "not seen"
+
+    def enable_camera(self, topic="/gripper_bottle/point"):
+        """Listen to gripper_bottle_detector. Its points are in the camera's frame; TF (from the
+        driver's joint states + the robot's URDF) puts them in base_link."""
+        from geometry_msgs.msg import PointStamped
+        self.node.create_subscription(PointStamped, topic, self.on_bottle_point, 10)
+
+    def on_bottle_point(self, msg):
+        import rclpy.time
+        from tf2_geometry_msgs import do_transform_point
+        try:
+            # latest transform: ALIGN only samples while the arm and base are still
+            tf = self.node.tf2_buffer.lookup_transform("base_link", msg.header.frame_id, rclpy.time.Time())
+        except Exception as e:   # no TF yet: skip this estimate
+            self.node.get_logger().warn(f"no transform base_link <- {msg.header.frame_id}: {e}",
+                                        throttle_duration_sec=2.0)
+            return
+        p = do_transform_point(msg, tf).point
+        with self._lock:
+            self._cam_seq += 1
+            self.camera = (self._cam_seq, (p.x, p.y, p.z), time.time())
+
+    def see_bottle(self):
+        with self._lock:
+            cam = self.camera
+        if cam is None or time.time() - cam[2] > self.CAMERA_MAX_AGE:
+            return None
+        return cam[0], cam[1]
+
+    def translate_base(self, dx, speed):
+        """Drive the base straight dx m (stretch_driver's translate_mobile_base, position mode).
+        Sent as its own goal; wait_motion waits for the driver to report it finished."""
+        self.flush()
+        handle = self._send({"translate_mobile_base": (float(dx), float(speed))})
+        self.base_future = handle.get_result_async()
 
     # --- state (from /stretch/joint_states) ---
     def _js(self, name):
@@ -137,6 +180,10 @@ class RosRobot(RobotInterface):
             goal = {k: p for k, (p, _) in pose.items()}          # gripper alone: driver default speed
         else:
             goal = {k: (p, v) for k, (p, v) in pose.items()}     # every joint has an explicit speed
+        self._send(goal)
+
+    def _send(self, goal):
+        """Send one goal, retrying while the driver rejects it. Returns the accepted goal handle."""
         t0 = time.time()
         while True:
             fut = self.node.move_to_pose(goal, blocking=False)
@@ -144,7 +191,7 @@ class RosRobot(RobotInterface):
                 time.sleep(0.01)
             handle = fut.result() if fut is not None else None
             if handle is not None and handle.accepted:
-                return
+                return handle
             if time.time() - t0 > self.GOAL_RETRY_S:
                 raise Abort(f"driver rejected the goal {goal} (is it in position mode?)")
             time.sleep(0.25)   # the driver rejects goals < 0.2 s after the previous one
@@ -158,6 +205,10 @@ class RosRobot(RobotInterface):
 
     # --- waiting ---
     def motion_done(self):
+        if self.base_future is not None:
+            if not self.base_future.done():
+                return False
+            self.base_future = None
         for j, tgt in self.targets.items():
             pos, vel, _ = self._js(self.JOINTS[j])
             if abs(pos - tgt) > self.TOL[j] or abs(vel) > self.STILL.get(j, 0.05):
@@ -213,6 +264,10 @@ def main(argv=None):
     argv = remove_ros_args(sys.argv if argv is None else ["handoff_ros"] + list(argv))[1:]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_handoff_args(ap)
+    ap.add_argument("--camera", action="store_true",
+                    help="line up with the bottle using the gripper camera before grasping (needs "
+                         "d405_basic.launch.py and gripper_bottle_detector running). The measured spot "
+                         "then only has to be within a few cm")
     ap.add_argument("--gripper-speed", type=float, default=None,
                     help="gripper speed sent to the driver (default: the driver's own default)")
     args = ap.parse_args(argv)
@@ -231,6 +286,8 @@ def main(argv=None):
     def on_runstop(msg):
         rr.runstopped = bool(msg.data)
     node.create_subscription(Bool, "/is_runstopped", on_runstop, 1)
+    if args.camera:
+        rr.enable_camera()
     try:
         t0 = time.time()
         while not node.joint_state.name and time.time() - t0 < 10.0:
@@ -245,7 +302,7 @@ def main(argv=None):
         node.switch_to_position_mode()
         if not args.yes and not confirm():
             return 0
-        res = run(rr, kin, lim, args.dry_run, args.stow)
+        res = run(rr, kin, lim, args.dry_run, args.stow, align=args.camera)
         return 0 if res.ok else 3
     except Abort as e:
         print("\nABORTED:", e)

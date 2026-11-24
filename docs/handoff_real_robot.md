@@ -171,6 +171,11 @@ and the driver clips that to the robot's limit (on our robot about 290-330 pct;
 the textbook "50 pct = open" only opens it part way). Check that the gripper
 opens fully and that the printed gripper readings match the `stretch_body` runs.
 
+## With the gripper camera (`handoff_ros --camera`)
+
+The camera lines the robot up with the bottle before it grasps, so the spot
+only has to be within a few cm. Setup and steps: [gripper_camera.md](gripper_camera.md).
+
 ## Tuning
 
 | Problem | Try |

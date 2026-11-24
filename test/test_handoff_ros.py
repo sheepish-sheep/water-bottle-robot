@@ -39,6 +39,7 @@ class FakeNode:
         self.pos = {"joint_lift": 0.2, "wrist_extension": 0.0, "joint_wrist_yaw": 3.14,
                     "joint_wrist_pitch": -0.4, "joint_wrist_roll": 0.0, "joint_gripper_finger_left": 0.0}
         self.goals, self.stopped, self.reject_left = [], 0, reject_first
+        self.base_x = 0.0   # how far the base has driven (translate_mobile_base goals)
 
     @property
     def joint_state(self):
@@ -51,9 +52,14 @@ class FakeNode:
         if accepted:
             self.goals.append(dict(pose))
             for k, v in pose.items():
-                self.pos[k] = v[0] if isinstance(v, tuple) else v
-        fut = types.SimpleNamespace(done=lambda: True,
-                                    result=lambda: types.SimpleNamespace(accepted=accepted))
+                if k in self.pos:
+                    self.pos[k] = v[0] if isinstance(v, tuple) else v
+        if accepted and "translate_mobile_base" in pose:
+            v = pose["translate_mobile_base"]
+            self.base_x += v[0] if isinstance(v, tuple) else v
+        handle = types.SimpleNamespace(accepted=accepted,
+                                       get_result_async=lambda: types.SimpleNamespace(done=lambda: True))
+        fut = types.SimpleNamespace(done=lambda: True, result=lambda: handle)
         return fut
 
     def stop_the_robot(self):
@@ -136,3 +142,56 @@ def test_gripper_targets_use_the_same_pct_units_as_stretch_body(clock):
     assert rr.open_rad > conv.robotis_to_finger(330.0)   # wider than our robot opens: the driver clips it
     rr2 = handoff_ros.RosRobot(FakeNode(), rr.spot, close_pct=-80.0, holding_pct=5.0)
     assert rr2.close_rad < rr2.holding_rad < rr2.open_rad
+
+
+# ---------- gripper camera ALIGN (handoff_ros --camera) ----------
+
+class FakeCamera:
+    """gripper_bottle_detector + TF: the bottle at a fixed spot in the world, seen in the
+    current base frame (shifted by however far the base has driven), a new estimate per call."""
+
+    def __init__(self, node, x, y, z=0.95, visible=True):
+        self.node, self.x, self.y, self.z, self.visible, self.seq = node, x, y, z, visible, 0
+
+    def __call__(self):
+        if not self.visible:
+            return None
+        self.seq += 1
+        return self.seq, (self.x - self.node.base_x, self.y, self.z)
+
+
+def align_run(clock, off_x=0.0, off_reach=0.0, visible=True):
+    node = FakeNode()
+    rr, kin, lim = make(node)          # measured spot: 0.70 m to the right, on the arm's line
+    rr.see_bottle = FakeCamera(node, kin.gx + off_x, -0.70 - off_reach, visible=visible)
+    res = handoff_real.run(rr, kin, lim, dry_run=True, align=True)
+    planned = handoff_real.plan_reach((kin.gx, -0.70, 0.90), kin, lim).arm_grasp
+    arm_cmds = [g["wrist_extension"][0] for g in node.goals if "wrist_extension" in g]
+    return res, node, planned, arm_cmds
+
+
+def test_align_corrects_the_base_and_the_reach(clock):
+    res, node, planned, arm = align_run(clock, off_x=0.04, off_reach=0.03)
+    assert res.ok, res.log
+    assert node.base_x == pytest.approx(0.04)                 # drove forward onto the bottle's line
+    assert max(arm) == pytest.approx(planned + 0.03)          # reached 3 cm farther
+    assert "ALIGNED" in [n for n, _ in res.log]
+
+
+def test_align_on_the_spot_doesnt_move_the_base(clock):
+    res, node, planned, arm = align_run(clock, off_x=0.005)
+    assert res.ok and node.base_x == 0.0
+    assert not any("translate_mobile_base" in g for g in node.goals)
+
+
+def test_align_refuses_a_bottle_far_from_the_spot(clock):
+    res, node, planned, arm = align_run(clock, off_x=0.15)
+    assert not res.ok and "measured spot" in res.reason
+    assert node.base_x == 0.0 and node.pos["wrist_extension"] == pytest.approx(0.0)   # retracted, no chase
+    assert max(arm) < planned                                 # never went to the grasp
+
+
+def test_align_without_a_camera_estimate_fails_safely(clock):
+    res, node, planned, arm = align_run(clock, visible=False)
+    assert not res.ok and "doesn't see" in res.reason
+    assert node.pos["wrist_extension"] == pytest.approx(0.0) and node.base_x == 0.0

@@ -277,12 +277,12 @@ def confirm():
     return True
 
 
-def run(robot, kin, lim, dry_run, stow=False):
+def run(robot, kin, lim, dry_run, stow=False, align=False):
     """Step the handoff state machine on `robot` (StretchRobot or the ROS one), printing each phase
     with the gripper reading. The robot provides dt, check_safety(), sample(t), gripper_pct() and a
     `phase` attribute."""
     res = Result()
-    gen = run_handoff(robot, kin, lim, res, give_back=True, dry_run=dry_run, stow=stow)
+    gen = run_handoff(robot, kin, lim, res, give_back=True, dry_run=dry_run, stow=stow, align=align)
     t0, shown = time.time(), 0
 
     def show(name, note):

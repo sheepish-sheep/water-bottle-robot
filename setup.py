@@ -30,6 +30,7 @@ setup(
             "obstacle_avoidance = water_bottle_robot.reactive.obstacle_avoidance:main",
             # perception
             "offered_bottle_detector = water_bottle_robot.perception.offered_bottle_detector:main",
+            "gripper_bottle_detector = water_bottle_robot.perception.gripper_bottle_detector:main",
             # sim test tools
             "nav_goal_test = water_bottle_robot.tools.nav_goal_test:main",
             "contact_replay = water_bottle_robot.tools.contact_replay:main",
