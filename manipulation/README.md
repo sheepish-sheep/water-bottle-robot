@@ -10,11 +10,12 @@ take the bottle from a person's hand instead of picking it up.
 ## Run it
 
 ```bash
-scripts/record_handoff_demo.sh              # renders ~/ros2_ws/artifacts/handoff/handoff_demo.mp4 (~3 min, headless)
-scripts/record_handoff_demo.sh --viewer     # live MuJoCo viewer (run on the VM desktop)
-scripts/record_handoff_demo.sh --azimuth -150   # person standing somewhere else (deg; -90 = robot's right)
+scripts/run_handoff_demo.sh                      # tests, then the demo in the live viewer (VM desktop)
+scripts/run_handoff_demo.sh --azimuth -150       # person standing somewhere else (deg; -90 = robot's right)
+scripts/run_handoff_demo.sh --random --seed 7    # a randomized person and bottle
 
-python3 manipulation/handoff_sim.py --trials 20 --seed 1   # randomized pass/fail batch
+python3 manipulation/handoff_sim.py --trials 20 --seed 1   # randomized pass/fail batch (headless)
+python3 manipulation/handoff_sim.py --video out.mp4         # render a video instead of the viewer
 python3 -m pytest test/test_handoff.py -q                  # planning tests (fast)
 python3 -m pytest test/test_handoff.py -q -m slow          # + full sim handoffs (~2 min)
 ```
