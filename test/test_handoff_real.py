@@ -196,7 +196,7 @@ def test_full_handoff_releases_on_tug(env):
 def test_stow_option_folds_after_handing_back(env):
     clock, install, _ = env
     robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
-    assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--stow", "--yes"]) == 0
+    assert handoff_real.main(SPOT + ["--holding-pct", "5", "--stow", "--yes"]) == 0
     assert robot.lift.status["pos"] == pytest.approx(0.3)
     assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(3.14159, abs=1e-3)
 
@@ -208,7 +208,7 @@ def test_never_folds_with_something_in_the_gripper(env, monkeypatch):
     robot = install(effort=lambda t: -20.0 if t > 46 else 0.0)
     robot.end_of_arm.j["stretch_gripper"].bottle = lambda: True
     monkeypatch.setattr("builtins.input", lambda msg="": "")
-    assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--stow", "--yes"]) == 0
+    assert handoff_real.main(SPOT + ["--holding-pct", "5", "--stow", "--yes"]) == 0
     assert robot.end_of_arm.get_joint("wrist_yaw").status["pos"] == pytest.approx(0.0)   # didn't fold
 
 
@@ -240,7 +240,7 @@ def test_not_homed_refuses_before_moving(env):
 def test_closing_on_nothing_fails_safely(env):
     clock, install, _ = env
     robot = install(bottle=False)
-    assert handoff_real.main(SPOT + ["--tug-threshold", "8", "--yes"]) == 3
+    assert handoff_real.main(SPOT + ["--holding-pct", "5", "--yes"]) == 3
     assert robot.arm.status["pos"] == pytest.approx(0.0)   # pulled back
 
 
@@ -260,9 +260,38 @@ def test_unreachable_spot_is_refused_without_connecting(env, dist):
     assert robot.stopped == 0
 
 
-def test_handoff_needs_a_measured_tug_threshold(env):
-    with pytest.raises(SystemExit):
-        handoff_real.main(SPOT + ["--yes"])
+def _noise(t, std):
+    """Deterministic, roughly Gaussian jitter (sum of uniforms) keyed to the time."""
+    import random
+    r = random.Random(round(t * 1000))
+    return std * (sum(r.random() for _ in range(12)) - 6.0)
+
+
+# Measured on our robot (tug-log, 2026-11-24): still effort mean -0.96, std 2.21 pct;
+# a gentle pull moved it by up to -8.8 pct.
+def _robot_effort(pull_from=None, pull=-8.8):
+    def f(t):
+        e = -0.96 + _noise(t, 2.21)
+        if pull_from is not None and pull_from < t < pull_from + 1.5:
+            e += pull * (0.7 + 0.3 * _noise(t, 1.0))   # a pull that wobbles around ~70-100% of its peak
+        return e
+    return f
+
+
+def test_auto_tug_detector_releases_on_our_robots_gentle_pull(env):
+    clock, install, _ = env
+    robot = install(effort=_robot_effort(pull_from=47.0))
+    assert handoff_real.main(SPOT + ["--yes"]) == 0          # no tug threshold given: automatic
+    assert robot.end_of_arm.get_joint("stretch_gripper").status["pos_pct"] == pytest.approx(50.0)  # let go
+
+
+@pytest.mark.parametrize("seed_offset", [0.0, 0.013, 0.029, 0.041, 0.057])
+def test_auto_tug_detector_ignores_our_robots_noise(env, monkeypatch, seed_offset):
+    clock, install, _ = env
+    clock.t = seed_offset                    # different noise sequence each run
+    install(effort=_robot_effort())          # nobody pulls: jitter only
+    monkeypatch.setattr("builtins.input", lambda msg="": "")
+    assert handoff_real.main(SPOT + ["--yes"]) == 3          # kept it (no false release)
 
 
 def test_tug_threshold_from_a_run_log(env, monkeypatch, capsys):
@@ -273,5 +302,5 @@ def test_tug_threshold_from_a_run_log(env, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda msg="": "")
     assert handoff_real.main(SPOT + ["--tug-threshold", "1000", "--yes"]) == 3   # kept it, as intended
     (log,) = os.listdir(logs)
-    threshold, sign = handoff_real_check.tug_log(os.path.join(logs, log))
-    assert sign == -1 and 4 < threshold < 8
+    threshold, sign, released = handoff_real_check.tug_log(os.path.join(logs, log))
+    assert sign == -1 and released and threshold < 12

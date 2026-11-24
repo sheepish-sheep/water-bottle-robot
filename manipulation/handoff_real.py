@@ -48,7 +48,7 @@ class StretchRobot(RobotInterface):
     TOL = {"lift": 0.01, "arm": 0.01, "wrist_yaw": 0.05, "wrist_pitch": 0.05, "wrist_roll": 0.05}
     STILL = {"lift": 0.005, "arm": 0.005}   # m/s; wrist joints use 0.05 rad/s
 
-    def __init__(self, robot, spot, close_pct=-50.0, holding_pct=5.0, tug_sign=1.0, log=None):
+    def __init__(self, robot, spot, close_pct=-80.0, holding_pct=None, tug_sign=1.0, log=None):
         self.r = robot
         self.spot = spot
         self.close_pct, self.holding_pct, self.tug_sign = close_pct, holding_pct, tug_sign
@@ -86,6 +86,8 @@ class StretchRobot(RobotInterface):
     def gripper_holding(self):
         # pct 0 = fingertips just touching; closed on nothing goes below 0,
         # closed on a 6-8 cm bottle stays well above it.
+        if self.holding_pct is None:   # no usable position check: closed = holding
+            return self.grip_cmd == "closed"
         return self.grip_cmd == "closed" and self.gripper_pct() > self.holding_pct
 
     def estimate_bottle(self):
@@ -194,9 +196,14 @@ def build_limits(args):
     lim = dataclasses.replace(
         lim, lift_speed=lim.lift_speed * s, arm_speed=lim.arm_speed * s,
         arm_approach_speed=lim.arm_approach_speed * s, wrist_speed=lim.wrist_speed * s)
-    if args.tug_threshold is not None:
-        # effort is in effort_pct on the real robot, not N
-        lim = dataclasses.replace(lim, tug_force=args.tug_threshold, tug_quiet=args.tug_threshold / 3)
+    # effort is in effort_pct on the real robot, not N. The tug threshold is set from the
+    # measured noise each time (handoff_controller.py); tug_force is only its floor.
+    # tug_quiet: the robot's still-arm effort jitters ~2 pct (measured), so "settled" is < 3.
+    # Our robot's measured jitter (std 2.2) is only ~4x smaller than a gentle pull (-8.8), so
+    # average over 0.5 s (a pull lasts that long anyway) and measure the noise for longer than
+    # the sim does. Checked against those numbers in test/test_handoff_real.py.
+    lim = dataclasses.replace(lim, tug_force=args.tug_threshold, tug_quiet=3.0,
+                              tug_hold=0.5, tug_noise_window=1.0)
     return lim
 
 
@@ -216,17 +223,20 @@ def main(argv=None):
                          "The robot grasps 7 cm above it; at least 15 cm of bottle must stick out above the hand")
     ap.add_argument("--dry-run", action="store_true",
                     help="reach to the grasp point with the gripper open, hold 4 s, come back. No grasp")
-    ap.add_argument("--tug-threshold", type=float,
-                    help="arm effort change (effort_pct) that counts as the person pulling. "
-                         "Measure it with handoff_real_check.py tug. Required unless --dry-run")
+    ap.add_argument("--tug-threshold", type=float, default=3.0,
+                    help="smallest arm effort change (effort_pct) that can count as a pull. The actual "
+                         "threshold is set automatically from the noise measured while holding the bottle "
+                         "out; this is only a floor. Default 3")
     ap.add_argument("--tug-sign", type=float, default=1.0, choices=[1.0, -1.0],
                     help="+1 if pulling the gripper away from the robot makes arm effort go DOWN, -1 if UP "
                          "(handoff_real_check.py tug tells you)")
     ap.add_argument("--speed", type=float, default=0.5, help="fraction of the sim speeds (default 0.5)")
-    ap.add_argument("--close-pct", type=float, default=-50.0,
-                    help="gripper close target (stretch_body pct; -100 = hardest squeeze). Default -50")
-    ap.add_argument("--holding-pct", type=float, default=5.0,
-                    help="gripper pct above which 'closed' means 'holding something' (0 = fingertips touch)")
+    ap.add_argument("--close-pct", type=float, default=-80.0,
+                    help="gripper close target (stretch_body pct; -100 = hardest squeeze). Default -80")
+    ap.add_argument("--holding-pct", type=float, default=None,
+                    help="gripper pct above which 'closed' means 'holding something'. Default: no check "
+                         "(on our robot the fingers bend so much that closed-on-a-bottle and closed-on-nothing "
+                         "read almost the same, so the robot assumes a closed gripper is holding)")
     ap.add_argument("--stow", action="store_true",
                     help="at the end, fold the gripper back and lower the lift. Default: stop with the arm "
                          "retracted and the gripper pointing out")
@@ -235,8 +245,6 @@ def main(argv=None):
 
     if not 0.1 <= args.speed <= 1.0:
         ap.error("--speed must be between 0.1 and 1.0")
-    if not args.dry_run and args.tug_threshold is None:
-        ap.error("--tug-threshold is required for a real handoff (measure it: handoff_real_check.py tug)")
 
     kin, lim = Kinematics(), build_limits(args)
     spot = fixed_spot(args.distance, args.hand_top, kin, lim)
@@ -281,13 +289,13 @@ def main(argv=None):
                 sr.check_safety()
                 while shown < len(res.log):
                     name, note = res.log[shown]
-                    print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct, holding if > {sr.holding_pct:g})", flush=True)
+                    print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct)", flush=True)
                     shown += 1
                 sr.phase = res.phase
                 sr.sample(time.time() - t0)
                 time.sleep(sr.dt)
             for name, note in res.log[shown:]:
-                print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct, holding if > {sr.holding_pct:g})", flush=True)
+                print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct)", flush=True)
             print("\nRESULT:", "OK" if res.ok else f"FAILED in {res.phase}: {res.reason}")
             return 0 if res.ok else 3
     except Abort as e:

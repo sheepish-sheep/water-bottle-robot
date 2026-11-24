@@ -86,38 +86,45 @@ Repeat until it lines up within about 1 cm. Then do it once more with the
 bottle in its stand at the cross: the open fingers should end up around the
 bottle without touching it.
 
-## 4. Measure the tug threshold
+## 4. The tug (nothing to measure)
 
-The robot hands the bottle back only when the person pulls on it. How much the
-arm's motor effort changes for "a gentle pull" has to be measured on this
-robot:
+The robot hands the bottle back only when the person pulls on it. The
+threshold is set automatically on every hand-back:
+
+1. The arm stops and settles.
+2. It measures how much the arm effort jitters for about 1.5 s while nobody
+   pulls.
+3. It lets go when the effort, averaged over 0.5 s, drops by more than 5x that
+   jitter.
+
+The terminal prints `TUG_ARMED ... threshold X` when it's ready.
+
+Measured on our robot: the still effort jitters by about 2 pct, and a gentle
+but firm pull changes it by about 9. Pulls much weaker than that (about 6 or
+less) are often missed. `--tug-threshold` is only a minimum (default 3). If
+pulling makes the effort go *up* on your robot, use `--tug-sign -1`.
+
+To check a run afterwards (no robot connection needed):
 
 ```bash
-python3 manipulation/handoff_real_check.py tug      # read-only
-```
-
-It needs the arm out about 20 cm with the gripper unfolded first (put it there
-with the gamepad teleop, then quit that). It records the effort while nobody
-touches the robot, then while someone pulls the gripper gently away from the
-robot. It prints something like `--tug-threshold 6.5 --tug-sign 1`.
-
-If it says the pulls barely changed anything, measure during a real handoff
-instead:
-
-```bash
-python3 manipulation/handoff_real.py --distance D --hand-top H --tug-threshold 1000   # never lets go
-#   when it offers the bottle back: wait 3 s, then pull gently 2-3 times.
-#   It keeps the bottle and asks you to take it.
 python3 manipulation/handoff_real_check.py tug-log ~/ament_ws/artifacts/handoff_real/run_<time>.csv
 ```
+
+It prints the threshold the robot would pick, whether your pull would have
+released the bottle, and the `--tug-sign` to use.
 
 ## 5. Handoff from the stand, then from a person
 
 ```bash
-python3 manipulation/handoff_real.py --distance D --hand-top H --tug-threshold T --tug-sign S
+python3 manipulation/handoff_real.py --distance D --hand-top H
 ```
 
-with D and H from step 3 and T and S from step 4.
+with D and H from step 3.
+
+When the robot offers the bottle back, the person **takes hold of it as soon
+as the arm stops and keeps holding it**. That way the bottle is already in
+their hand if the robot ever lets go early. Once `TUG_ARMED` appears, they
+pull toward themselves, gently but firmly, for about half a second.
 
 1. **Bottle in the stand.** When the fingers close, the robot waits 1.8 s
    for the person to let go, then pulls the arm in sideways. It doesn't lift
@@ -141,11 +148,11 @@ doesn't fold the gripper back or lower the lift. Add `--stow` if you want that
 
 | Problem | Try |
 |---|---|
-| "gripper closed on nothing" | spot is off: redo the dry run |
-| bottle slips in the fingers | squeeze harder: `--close-pct -70` (default -50; -100 is the maximum) |
-| bottle dents | squeeze less: `--close-pct -30` |
-| "closed" but it says it's not holding | `handoff_real_check.py watch` with the bottle in the closed gripper; set `--holding-pct` below that reading |
-| lets go too easily / not at all | redo step 4, or raise / lower `--tug-threshold` |
+| it closes on nothing and carries on | there's no "holding" check by default (on our robot the bendy fingers read about the same with or without a bottle), so watch for this: redo the dry run |
+| bottle slips in the fingers | squeeze harder: `--close-pct -95` (default -80; -100 is the maximum) |
+| bottle dents | squeeze less: `--close-pct -60` |
+| doesn't let go when pulled | pull a bit harder and for at least 1/2 s; check with `tug-log` |
+| lets go before anyone pulls | raise the minimum: `--tug-threshold 8` |
 | "motion didn't finish" | something blocked a joint: check for contact, then run again |
 | everything feels slow | `--speed 0.8` (only after it works at 0.5) |
 
