@@ -251,7 +251,9 @@ def run_handoff(robot: RobotInterface, kin=Kinematics(), lim=Limits(), result: R
             res.log.append(("NO_FOLD", "arm retracted; gripper left pointing out"))
             return
         yield from grip("closed")    # close before folding back next to the mast
-        if robot.gripper_holding():  # e.g. the person didn't take the bottle after all
+        # e.g. the person didn't take the bottle after all. Only if the robot can actually
+        # sense holding: without that, "closed" always reads as holding.
+        if getattr(robot, "senses_holding", True) and robot.gripper_holding():
             res.log.append(("NO_FOLD", "something is in the gripper; not folding"))
             return
         robot.move("lift", min(robot.joint("lift"), lim.unfold_lift_max), lim.lift_speed)

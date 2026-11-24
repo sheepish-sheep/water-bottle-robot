@@ -52,6 +52,9 @@ class StretchRobot(RobotInterface):
         self.r = robot
         self.spot = spot
         self.close_pct, self.holding_pct, self.tug_sign = close_pct, holding_pct, tug_sign
+        # Without --holding-pct a closed gripper just counts as holding: it can't tell.
+        self.senses_holding = holding_pct is not None
+        self.finished_ok = False
         self.log = log
         self.targets = {}
         self.grip_cmd = None
@@ -296,6 +299,7 @@ def main(argv=None):
                 time.sleep(sr.dt)
             for name, note in res.log[shown:]:
                 print(f"[{time.time() - t0:6.1f}s] {name} {note}  (gripper {sr.gripper_pct():.1f} pct)", flush=True)
+            sr.finished_ok = res.ok
             print("\nRESULT:", "OK" if res.ok else f"FAILED in {res.phase}: {res.reason}")
             return 0 if res.ok else 3
     except Abort as e:
@@ -309,7 +313,9 @@ def main(argv=None):
             sr.halt()
         return 4
     finally:
-        if sr and sr.gripper_holding():
+        # After a finished run the bottle was handed back (or never grasped, in a dry run),
+        # so a closed gripper is empty: no prompt.
+        if sr and not sr.finished_ok and sr.gripper_holding():
             # shutting down can let the gripper go limp: don't drop the bottle
             try:
                 input("The robot is still holding the bottle. Take hold of it and press Enter to open the gripper.")
